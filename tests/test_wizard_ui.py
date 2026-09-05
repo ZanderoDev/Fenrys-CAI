@@ -1,4 +1,5 @@
 import pytest
+from textual.widgets import Button
 
 from fenrys.ui.app import FenrysApp
 from fenrys.ui.wizard import SetupWizardApp, SetupScreen
@@ -6,13 +7,22 @@ from fenrys.ui.wizard import SetupWizardApp, SetupScreen
 
 @pytest.mark.asyncio
 async def test_wizard_renders_real_children(temp_config):
-    async with SetupWizardApp(temp_config).run_test() as pilot:
+    async with SetupWizardApp(temp_config).run_test(size=(120, 50)) as pilot:
         wizard = pilot.app.query_one(SetupScreen)
         assert wizard.size.width > 0
         assert wizard.size.height > 0
         assert isinstance(wizard, SetupScreen)
         assert len(wizard.query("#wizard").first().children) >= 2
         assert wizard.query_one("#next")
+        wizard.step = 2
+        wizard.render_step()
+        await pilot.pause()
+        assert wizard.query_one("#save-custom-provider")
+        wizard.query_one("#custom-provider-name").value = "openrouter"
+        wizard.query_one("#custom-base-url").value = "https://openrouter.ai/api/v1"
+        wizard.query_one("#custom-api-env").value = "OPENROUTER_API_KEY"
+        await wizard.on_button_pressed(Button.Pressed(wizard.query_one("#save-custom-provider")))
+        assert temp_config.load("providers.yaml")["providers"]["openrouter"]["type"] == "custom"
 
 
 @pytest.mark.asyncio

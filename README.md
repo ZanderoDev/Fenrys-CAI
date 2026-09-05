@@ -41,6 +41,20 @@ fenrys session export <session-id> --format html
 fenrys report --format markdown
 ```
 
+Custom OpenAI-compatible providers (OpenRouter, DeepSeek, vLLM, LM Studio,
+LiteLLM, and similar endpoints) can be added directly in the setup wizard at
+**Provider Setup → Save Custom Provider**. The wizard writes only the endpoint
+and the API-key environment variable name; the secret itself must already be
+available in the root process environment. The equivalent YAML is:
+
+```yaml
+providers:
+  my_provider:
+    type: custom
+    base_url: https://api.example.com/v1
+    api_key_env: MY_PROVIDER_API_KEY
+```
+
 Fenrys does **not** clone HexStrike, create a HexStrike virtualenv, or install
 HexStrike dependencies. It consumes the existing root-owned installation:
 `/root/hexstrike-ai` by default. Set `HEXSTRIKE_HOME` and optionally
@@ -73,7 +87,10 @@ config or printed.
 
 ## Changelog
 
-### 0.0.1-beta
+### 0.1.0-beta
+- Added custom OpenAI-compatible provider support in the setup wizard
+  (`Provider Setup → Save Custom Provider`) for endpoints such as
+  OpenRouter, DeepSeek, vLLM, LM Studio, or LiteLLM.
 - Fixed `BudgetController` so `max_total_tool_calls_per_session` is tracked
   per session (persists across every task) instead of resetting on each
   `run_task()` call. Per-task counters (`max_tool_calls_per_task`,
@@ -87,7 +104,7 @@ config or printed.
   screen stack from `on_mount()` instead.
 - Added `.gitignore` for local config, virtualenvs, and runtime data.
 
-## Known limitations (0.0.1-Beta)
+## Known limitations (0.1.0-Beta)
 
 - Tested by static review and the bundled unit tests only (`uv run pytest`);
   it has not yet been run against a live HexStrike backend or a real target

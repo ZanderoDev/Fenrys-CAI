@@ -9,3 +9,7 @@ providers:
     type: openai_compatible
     base_url: http://127.0.0.1:11434/v1
     api_key_env: null
+  openrouter:
+    type: custom
+    base_url: https://openrouter.ai/api/v1
+    api_key_env: OPENROUTER_API_KEY

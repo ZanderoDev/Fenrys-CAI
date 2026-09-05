@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
@@ -71,6 +72,14 @@ class SetupScreen(Screen):
                 Input(placeholder="API key (used in memory for this test only)", password=True, id="api-key"),
                 Label("Not tested yet", id="provider-status", classes="muted"),
                 Button("Test Connection", id="test-provider"),
+                Label("Need another endpoint? Add any OpenAI-compatible provider below "
+                     "(OpenRouter, DeepSeek, vLLM, LM Studio, LiteLLM, etc.).", classes="muted"),
+                Input(placeholder="Custom provider name, e.g. openrouter", id="custom-provider-name"),
+                Input(value="http://127.0.0.1:11434/v1",
+                      placeholder="Base URL ending in /v1", id="custom-base-url"),
+                Input(placeholder="API key environment variable, e.g. OPENROUTER_API_KEY",
+                      id="custom-api-env"),
+                Button("Save Custom Provider", id="save-custom-provider"),
             ]
         elif self.step == 3:
             content += [
@@ -127,6 +136,39 @@ class SetupScreen(Screen):
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
         button_id = event.button.id
+        if button_id == "save-custom-provider":
+            self.capture()
+            name = self.query_one("#custom-provider-name", Input).value.strip()
+            base_url = self.query_one("#custom-base-url", Input).value.strip()
+            api_env = self.query_one("#custom-api-env", Input).value.strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+                self.query_one("#provider-status", Label).update(
+                    "✗ Provider name: letters, numbers, _ and - only"
+                )
+                return
+            if not base_url.startswith(("http://", "https://")):
+                self.query_one("#provider-status", Label).update(
+                    "✗ Base URL must start with http:// or https://"
+                )
+                return
+            if api_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", api_env):
+                self.query_one("#provider-status", Label).update(
+                    "✗ API env must be a valid environment variable name"
+                )
+                return
+            providers = self.config.load("providers.yaml")
+            providers["providers"][name] = {
+                "type": "custom",
+                "base_url": base_url.rstrip("/"),
+                "api_key_env": api_env or None,
+            }
+            self.config.save("providers.yaml", providers)
+            self.provider = name
+            self.query_one("#provider-status", Label).update(
+                f"✓ Saved {name}; select it above and test the connection."
+            )
+            self.render_step()
+            return
         if button_id == "test-provider":
             self.capture()
             if self.api_key:
