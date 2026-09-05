@@ -1,0 +1,6 @@
+mode: NORMAL
+hexstrike_url: http://127.0.0.1:8888
+hexstrike_install_dir: /root/hexstrike-ai
+hexstrike_python: python3
+database_path: ~/.local/share/fenrys-cai/fenrys.db
+raw_output_dir: ~/.local/share/fenrys-cai/raw

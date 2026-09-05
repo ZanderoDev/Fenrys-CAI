@@ -1,0 +1,15 @@
+model_tiers:
+  heavy_reasoning: {provider: anthropic, model: claude-opus-5}
+  balanced: {provider: anthropic, model: claude-sonnet-5}
+  fast_cheap: {provider: anthropic, model: claude-haiku-4-5-20251001}
+agents:
+  orchestrator: heavy_reasoning
+  web: balanced
+  pwn: heavy_reasoning
+  recon: fast_cheap
+  network: fast_cheap
+  forensics: balanced
+  osint: fast_cheap
+  vulnintel: balanced
+  crypto: heavy_reasoning
+  misc: balanced

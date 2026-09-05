@@ -1,0 +1,11 @@
+providers:
+  anthropic:
+    type: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+  openai:
+    type: openai
+    api_key_env: OPENAI_API_KEY
+  local_ollama:
+    type: openai_compatible
+    base_url: http://127.0.0.1:11434/v1
+    api_key_env: null

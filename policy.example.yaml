@@ -1,0 +1,16 @@
+budgets:
+  max_tool_calls_per_task: 6
+  max_same_tool_same_target_retries: 2
+  max_agent_turns_per_task: 10
+  max_total_tool_calls_per_session: 200
+  max_wallclock_per_task_seconds: 900
+  max_consecutive_failures_before_escalation: 3
+execution_tiers:
+  cheap: automatic
+  moderate: task_validation
+  high-impact: explicit_approval
+sandbox:
+  backend: restricted
+  network: false
+  timeout_seconds: 30
+  memory_mb: 512
