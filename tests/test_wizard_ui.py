@@ -8,6 +8,8 @@ from fenrys.ui.wizard import SetupWizardApp, SetupScreen
 async def test_wizard_renders_real_children(temp_config):
     async with SetupWizardApp(temp_config).run_test() as pilot:
         wizard = pilot.app.query_one(SetupScreen)
+        assert wizard.size.width > 0
+        assert wizard.size.height > 0
         assert isinstance(wizard, SetupScreen)
         assert len(wizard.query("#wizard").first().children) >= 2
         assert wizard.query_one("#next")

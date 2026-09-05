@@ -203,4 +203,11 @@ class SetupWizardApp(App):
         self.config = config or ConfigManager()
 
     def compose(self) -> ComposeResult:
-        yield SetupScreen(self.config, standalone=True)
+        # SetupScreen is a Screen, not a child widget. Yielding it from
+        # compose() gives it a 0x0 layout in Textual, leaving only the
+        # Nightshade background visible. Push it onto the app screen stack
+        # after the default screen has been mounted.
+        yield from ()
+
+    def on_mount(self) -> None:
+        self.push_screen(SetupScreen(self.config, standalone=True))

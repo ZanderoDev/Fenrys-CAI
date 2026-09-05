@@ -71,7 +71,23 @@ config or printed.
   and then delegate to a specialist agent, persisting each task and report in
   SQLite.
 
-## Known limitations (0.0.1-Alpha)
+## Changelog
+
+### 0.0.1-beta
+- Fixed `BudgetController` so `max_total_tool_calls_per_session` is tracked
+  per session (persists across every task) instead of resetting on each
+  `run_task()` call. Per-task counters (`max_tool_calls_per_task`,
+  `max_agent_turns_per_task`) now reset via `start_task()` at the start of
+  each task.
+- Removed the unused `budget` field from `Orchestrator` (planning never
+  enforced it; enforcement lives in `InvestigationRuntime`).
+- Fixed the setup wizard rendering as a blank screen: `SetupScreen` is a
+  `Screen`, not a child widget, so yielding it from `compose()` gave it a
+  0x0 layout and only the background was visible. It is now pushed onto the
+  screen stack from `on_mount()` instead.
+- Added `.gitignore` for local config, virtualenvs, and runtime data.
+
+## Known limitations (0.0.1-Beta)
 
 - Tested by static review and the bundled unit tests only (`uv run pytest`);
   it has not yet been run against a live HexStrike backend or a real target
