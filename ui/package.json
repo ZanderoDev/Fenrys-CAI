@@ -1,0 +1,31 @@
+{
+  "name": "fenrys-tui",
+  "version": "0.1.0",
+  "description": "Fenrys-CAI terminal UI powered by React Ink",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "fenrys-tui": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.tsx",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^5.1.0",
+    "ink-text-input": "^6.0.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

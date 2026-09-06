@@ -1,0 +1,45 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+hexstrike-env/
+
+# Local config / secrets (real configs, written by `fenrys setup`)
+.env
+config.yaml
+agents.yaml
+policy.yaml
+providers.yaml
+scope.yaml
+.fenrys/
+
+# Build artifacts
+build/
+dist/
+ui/dist/
+node_modules/
+*.egg-info/
+src/*.egg-info/
+
+# Runtime data
+data/*.db
+data/raw/
+*.db
+*.sqlite3
+*.bak
+*.tmp
+transcripts/
+loot/
+input_history
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
