@@ -21,6 +21,11 @@ assert_contains() {
     fi
 }
 
+# Hermetic HOME: real user config must neither affect results nor get polluted
+export HOME="$(mktemp -d)"
+export XDG_CONFIG_HOME="$HOME/.config" XDG_DATA_HOME="$HOME/.local/share"
+trap 'rm -rf "$HOME"' EXIT
+
 gateway_request() {
     echo "$1" | timeout 10 uv run python -m fenrys.gateway 2>/dev/null | head -1
 }
@@ -89,7 +94,7 @@ fi
 # ─── Test 9: Prompt (streaming) ─────────────────────────────────────────────
 
 bold "Test 9: Prompt (streaming events)"
-RESULT=$(printf '{"jsonrpc":"2.0","id":1,"method":"session.new","params":{"target":"10.10.10.1","mode":"CTF"}}\n{"jsonrpc":"2.0","id":2,"method":"prompt","params":{"text":"hello"}}\n' | timeout 20 uv run python -m fenrys.gateway 2>/dev/null)
+RESULT=$(printf '{"jsonrpc":"2.0","id":1,"method":"session.new","params":{"target":"10.10.10.1","mode":"CTF"}}\n{"jsonrpc":"2.0","id":2,"method":"prompt","params":{"text":"summarize system status in one line"}}\n' | timeout 20 uv run python -m fenrys.gateway 2>/dev/null)
 # Prompt may fail without API key - that's OK, gateway still works
 if echo "$RESULT" | grep -q "error.*API key"; then
     green "  ✓ Prompt handled gracefully (no API key configured)"

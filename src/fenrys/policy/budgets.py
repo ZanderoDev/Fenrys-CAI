@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(slots=True)
@@ -12,6 +14,7 @@ class BudgetController:
     consecutive_failures: int = 0
     started_at: float = 0.0
     attempts: dict[tuple[str, str], int] | None = None
+    lock: Any = field(default=None, compare=False, repr=False)
 
     def __post_init__(self):
         if not self.started_at:
@@ -35,6 +38,35 @@ class BudgetController:
         self.tool_calls += 1
         key = (tool, target)
         self.attempts[key] = self.attempts.get(key, 0) + 1
+        self.consecutive_failures = 0 if success else self.consecutive_failures + 1
+
+    def _ensure_lock(self) -> Any:
+        # Lazy: asyncio.Lock hanya dibuat di dalam event loop yang memakai.
+        if self.lock is None:
+            self.lock = asyncio.Lock()
+        return self.lock
+
+    async def claim(self, tool: str = "", target: str = "") -> tuple[bool, str]:
+        """Cek-dan-catat atomik untuk jalur async (anti-TOCTOU asyncio.gather).
+
+        Berbeda dari pasangan allow+record: klaim menaikkan tool_calls dan
+        attempts SEBELUM tool dieksekusi, sehingga N klaim paralel tidak bisa
+        semuanya lolos di bawah cap. Panggil note_result() setelah eksekusi
+        untuk memperbarui consecutive_failures (agar tidak double-count).
+        """
+        lock = self._ensure_lock()
+        async with lock:
+            allowed, reason = self.allow_tool_call(tool, target)
+            if not allowed:
+                return False, reason
+            self.tool_calls += 1
+            key = (tool, target)
+            self.attempts[key] = self.attempts.get(key, 0) + 1
+            return True, ""
+
+    def note_result(self, success: bool) -> None:
+        """Lanjutan claim(): hanya perbarui consecutive_failures (sinkron,
+        atomik terhadap event loop karena tanpa await di dalamnya)."""
         self.consecutive_failures = 0 if success else self.consecutive_failures + 1
 
     def allow_agent_turn(self) -> tuple[bool, str]:

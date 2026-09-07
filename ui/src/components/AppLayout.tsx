@@ -105,7 +105,7 @@ export function AppLayout({
         <Text bold color={colors.primary}>
           ⚕ Fenrys-CAI
         </Text>
-        <Text dimColor> v0.1.0</Text>
+        <Text dimColor> v2.2.0-beta</Text>
         {session_id && (
           <Text dimColor> │ {session_id}</Text>
         )}

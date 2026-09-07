@@ -16,13 +16,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "raw_output_dir": "~/.local/share/fenrys-cai/raw",
 }
 DEFAULT_POLICY = {
+    # Generous ceilings for CTF: they only stop true infinite loops, never a
+    # legitimate solve. Tune per deployment via policy.yaml if needed.
     "budgets": {
-        "max_tool_calls_per_task": 6,
-        "max_same_tool_same_target_retries": 2,
-        "max_agent_turns_per_task": 10,
-        "max_total_tool_calls_per_session": 200,
-        "max_wallclock_per_task_seconds": 900,
-        "max_consecutive_failures_before_escalation": 3,
+        "max_tool_calls_per_task": 60,
+        "max_same_tool_same_target_retries": 10,
+        "max_agent_turns_per_task": 50,
+        "max_specialist_turns_per_task": 40,
+        "max_total_tool_calls_per_session": 2000,
+        "max_wallclock_per_task_seconds": 3600,
+        "max_consecutive_failures_before_escalation": 10,
     }
 }
 DEFAULT_SCOPE = {"targets": [], "cidrs": [], "hostnames": [], "urls": []}

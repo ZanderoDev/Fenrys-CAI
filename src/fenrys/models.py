@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, AsyncIterator
@@ -53,6 +54,7 @@ class ModelResponse:
     provider: str
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     raw: dict[str, Any] = field(default_factory=dict)
+    finish_reason: str = ""
 
 
 @dataclass(slots=True)
@@ -80,6 +82,24 @@ class NormalizedToolResult:
 class ModelStreamChunk:
     """A single chunk from a streaming LLM response."""
     content: str = ""
+    reasoning: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     finished: bool = False
+    finish_reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
+
+
+TURN_EXHAUSTED_MARKER = "[dihentikan: batas turn tercapai]"
+
+
+def parse_tool_call(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Split a raw tool call into (name, arguments). Single shared helper."""
+    function = call.get("function") or {}
+    name = call.get("name") or function.get("name") or ""
+    arguments = call.get("arguments") or function.get("arguments") or {}
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+    return str(name), arguments if isinstance(arguments, dict) else {}

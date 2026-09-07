@@ -105,21 +105,6 @@ HexStrike exposes a large MCP tool catalog, so Fenrys avoids sending the entire 
 
 ## Changelog
 
-### 0.9.0-beta
-- New Hermes-style scrollback REPL (`fenrys`): prompt_toolkit + Rich, copyable
-  output (select + Ctrl+Shift+C), Enter submit, Alt+Enter/Ctrl+J newline,
-  bracketed paste, slash commands, per-turn token/elapsed/tps status bar.
-- New sequential setup wizard (`fenrys setup`): plain prompts, writes config
-  files plus `~/.config/fenrys-cai/.env` for API keys. Legacy Textual TUI kept
-  behind `fenrys --textual`.
-- Startup panel: ASCII logo + pet art, tools/engine/model/session summary.
-- Auto flag detection → clipboard + loot file; `/copy`, `/save`, `/resume`.
-- Efficiency pass: direct answers for simple prompts, single direct tool for
-  simple actions, delegation demoted to expensive last resort, trimmed tool
-  surface (40 → 12), minimal specialist prompts.
-- Streaming-callback hardening: sync/None `on_token`/`on_tool_*`/`on_usage`
-  can no longer crash the agent loop.
-
 ### Unreleased
 - Fixed: after the setup wizard's "Launch Dashboard" step, the CLI now opens
   the dashboard instead of exiting the process

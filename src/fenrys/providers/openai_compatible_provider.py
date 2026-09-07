@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -10,6 +11,17 @@ import httpx
 
 from fenrys.models import Message, ModelResponse, ModelStreamChunk, ProviderHealth, ToolSpec
 from .base import ModelProvider
+
+# Status relay/upstream yang layak dicoba ulang sekali (transient).
+_RETRYABLE_STATUS = frozenset({502, 503, 504})
+
+
+def _friendly_server_error(name: str, url: str, status: int) -> RuntimeError:
+    host = url.split("://", 1)[-1].split("/", 1)[0]
+    return RuntimeError(
+        f"{name}: server error {status} di {host} — relay/upstream bermasalah, "
+        f"bukan request Fenrys. Coba lagi, ganti model, atau hubungi admin provider."
+    )
 
 
 class OpenAICompatibleProvider(ModelProvider):
@@ -33,6 +45,15 @@ class OpenAICompatibleProvider(ModelProvider):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    def _request_headers(self) -> dict[str, str]:
+        """Per-request headers: base + unique Idempotency-Key.
+
+        Relays like Vexacode document Idempotency-Key; unique per call so
+        automatic retries never double-execute. Servers that don't care
+        simply ignore the header.
+        """
+        return {**self._headers(), "Idempotency-Key": f"fenrys-{time.monotonic_ns()}"}
 
     def _build_payload(
         self,
@@ -89,10 +110,21 @@ class OpenAICompatibleProvider(ModelProvider):
         if not self.model:
             raise ValueError(f"model is required for provider {self.name}")
         payload = self._build_payload(messages, tools, max_tokens, temperature, stream=False)
-        async with httpx.AsyncClient(timeout=90) as client:
-            response = await client.post(f"{self.base_url}/chat/completions", json=payload, headers=self._headers())
-            response.raise_for_status()
-            data = response.json()
+        url = f"{self.base_url}/chat/completions"
+        data: dict[str, Any] = {}
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    response = await client.post(url, json=payload, headers=self._request_headers())
+                    response.raise_for_status()
+                    data = response.json()
+                break
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if status in _RETRYABLE_STATUS and attempt == 0:
+                    await asyncio.sleep(2)
+                    continue
+                raise _friendly_server_error(self.name, url, status) from exc
         choice = (data.get("choices") or [{}])[0]
         message = choice.get("message") or {}
         return ModelResponse(
@@ -100,7 +132,9 @@ class OpenAICompatibleProvider(ModelProvider):
             model=self.model,
             provider=self.name,
             tool_calls=message.get("tool_calls") or [],
-            raw={"id": data.get("id"), "usage": data.get("usage")},
+            raw={"id": data.get("id"), "usage": data.get("usage"),
+                 "reasoning": message.get("reasoning_content") or message.get("reasoning") or ""},
+            finish_reason=str(choice.get("finish_reason") or ""),
         )
 
     async def stream(
@@ -117,67 +151,92 @@ class OpenAICompatibleProvider(ModelProvider):
             raise ValueError(f"model is required for provider {self.name}")
 
         payload = self._build_payload(messages, tools, max_tokens, temperature, stream=True)
+        url = f"{self.base_url}/chat/completions"
 
         tool_calls_acc: dict[int, dict[str, Any]] = {}
         accumulated_content = ""
+        yielded_any = False
+        usage: dict[str, Any] = {}
+        finish_reason = ""
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, read=300.0)) as client:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                json=payload,
-                headers=self._headers(),
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    data_str = line[6:].strip()
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data_str)
-                    except json.JSONDecodeError:
-                        continue
+        for attempt in range(2):
+            if yielded_any:
+                break  # jangan duplikasi token: retry hanya bila belum ada output
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, read=300.0)) as client:
+                    async with client.stream(
+                        "POST",
+                        url,
+                        json=payload,
+                        headers=self._request_headers(),
+                    ) as response:
+                        response.raise_for_status()
+                        async for line in response.aiter_lines():
+                            if not line.startswith("data: "):
+                                continue
+                            data_str = line[6:].strip()
+                            if data_str == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data_str)
+                            except json.JSONDecodeError:
+                                continue
 
-                    choice = (chunk.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
+                            choice = (chunk.get("choices") or [{}])[0]
+                            delta = choice.get("delta") or {}
+                            if choice.get("finish_reason"):
+                                finish_reason = str(choice["finish_reason"])
 
-                    # Content delta
-                    content = delta.get("content")
-                    if content:
-                        accumulated_content += content
-                        yield ModelStreamChunk(content=content, finished=False)
+                            # Content delta
+                            content = delta.get("content")
+                            if content:
+                                accumulated_content += content
+                                yielded_any = True
+                                yield ModelStreamChunk(content=content, finished=False)
 
-                    # Tool call deltas
-                    for tc_delta in delta.get("tool_calls") or []:
-                        idx = tc_delta.get("index", 0)
-                        if idx not in tool_calls_acc:
-                            tool_calls_acc[idx] = {
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        entry = tool_calls_acc[idx]
-                        if tc_delta.get("id"):
-                            entry["id"] = tc_delta["id"]
-                        fn = tc_delta.get("function", {})
-                        if fn.get("name"):
-                            entry["function"]["name"] = fn["name"]
-                        if fn.get("arguments"):
-                            entry["function"]["arguments"] += fn["arguments"]
+                            # Reasoning delta (DeepSeek-reasoner style: billed but
+                            # invisible unless captured — never drop it silently)
+                            reasoning = delta.get("reasoning_content") or delta.get("reasoning")
+                            if reasoning:
+                                yielded_any = True
+                                yield ModelStreamChunk(reasoning=reasoning, finished=False)
 
-                    # Usage info (from stream_options)
-                    usage = chunk.get("usage") or {}
+                            # Tool call deltas
+                            for tc_delta in delta.get("tool_calls") or []:
+                                idx = tc_delta.get("index", 0)
+                                if idx not in tool_calls_acc:
+                                    tool_calls_acc[idx] = {
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                    }
+                                entry = tool_calls_acc[idx]
+                                if tc_delta.get("id"):
+                                    entry["id"] = tc_delta["id"]
+                                fn = tc_delta.get("function", {})
+                                if fn.get("name"):
+                                    entry["function"]["name"] = fn["name"]
+                                if fn.get("arguments"):
+                                    entry["function"]["arguments"] += fn["arguments"]
 
-                # Final chunk with assembled tool calls
-                assembled = list(tool_calls_acc.values())
-                yield ModelStreamChunk(
-                    content="",
-                    tool_calls=assembled,
-                    finished=True,
-                    usage=usage,
-                )
+                            # Usage info (from stream_options)
+                            usage = chunk.get("usage") or {}
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if status in _RETRYABLE_STATUS and attempt == 0 and not yielded_any:
+                    await asyncio.sleep(2)
+                    continue
+                raise _friendly_server_error(self.name, url, status) from exc
+
+        # Final chunk with assembled tool calls
+        assembled = list(tool_calls_acc.values())
+        yield ModelStreamChunk(
+            content="",
+            tool_calls=assembled,
+            finished=True,
+            finish_reason=finish_reason,
+            usage=usage,
+        )
 
     async def health_check(self) -> ProviderHealth:
         started = time.perf_counter()

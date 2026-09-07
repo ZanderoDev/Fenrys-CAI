@@ -28,13 +28,16 @@ class EvidenceManager:
         self.flag_patterns = [re.compile(pattern) for pattern in (flag_patterns or DEFAULT_FLAG_PATTERNS)]
 
     def wrap_untrusted(self, tool: str, output: str) -> str:
-        return f'<tool_output tool="{tool}" trust="untrusted">\n{output}\n</tool_output>'
+        # Netralkan forged close tag agar output model tidak bisa mengakhiri
+        # blok <tool_output> lebih awal dan menyisipkan instruksi palsu.
+        safe = output.replace("</tool_output>", "[forged-close-tag removed]")
+        return f'<tool_output tool="{tool}" trust="untrusted">\n{safe}\n</tool_output>'
 
     def detect_injection(self, output: str) -> bool:
         return any(pattern.search(output) for pattern in INJECTION_PATTERNS)
 
     def normalize(self, tool: str, output: str, success: bool, duration_ms: int,
-                  session_id: str | None = None, exit_code: int | None = 0,
+                  session_id: str | None = None, exit_code: int | None = None,
                   error: str | None = None) -> NormalizedToolResult:
         raw_path = None
         if len(output.encode("utf-8")) > 4096:

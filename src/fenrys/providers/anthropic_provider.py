@@ -58,15 +58,34 @@ class AnthropicProvider(ModelProvider):
         system, body_messages = self._convert_messages(messages)
         payload: dict[str, Any] = {"model": self.model, "messages": body_messages, "max_tokens": max_tokens}
         if system:
-            payload["system"] = system
+            # Prompt caching: system block is re-sent identically every agent turn,
+            # so mark a cache breakpoint (behavior-identical, cheaper/faster on hits).
+            payload["system"] = [{"type": "text", "text": system,
+                                  "cache_control": {"type": "ephemeral"}}]
         if stream:
             payload["stream"] = True
         if temperature is not None:
             payload["temperature"] = temperature
         if tools:
-            payload["tools"] = [{"name": t.name, "description": t.description,
-                "input_schema": {"type": "object", "properties": {p: {"type": "string"} for p in t.required_parameters},
-                                 "required": t.required_parameters}} for t in tools]
+            converted = []
+            for t in tools:
+                # Sumber utama: output_schema (registry hanya mengisi ini;
+                # required_parameters selalu [] demi kompat API).
+                schema = t.output_schema
+                if schema:
+                    if not isinstance(schema, dict) or schema.get("type") != "object":
+                        schema = {"type": "object", "properties": {}, "additionalProperties": True}
+                elif t.required_parameters:
+                    schema = {"type": "object",
+                              "properties": {p: {"type": "string"} for p in t.required_parameters},
+                              "required": list(t.required_parameters)}
+                else:
+                    schema = {"type": "object", "properties": {}, "additionalProperties": True}
+                converted.append({"name": t.name, "description": t.description,
+                                  "input_schema": schema})
+            # Second breakpoint: tool schemas are also stable across turns.
+            converted[-1] = {**converted[-1], "cache_control": {"type": "ephemeral"}}
+            payload["tools"] = converted
         return payload, system, body_messages
 
     async def complete(self, messages, tools=None, max_tokens=1024, temperature=None):
@@ -78,7 +97,8 @@ class AnthropicProvider(ModelProvider):
         blocks = data.get("content", [])
         content = "\n".join(block.get("text", "") for block in blocks if block.get("type") == "text")
         tool_calls = [
-            {"name": block.get("name", ""), "arguments": block.get("input", {})}
+            {"id": block.get("id", ""), "name": block.get("name", ""),
+             "arguments": block.get("input", {})}
             for block in blocks if block.get("type") == "tool_use"
         ]
         return ModelResponse(content, self.model, self.name, tool_calls, raw={"usage": data.get("usage")})
@@ -154,12 +174,16 @@ class AnthropicProvider(ModelProvider):
                     elif event_type == "message_delta":
                         usage = event.get("usage", {})
 
-        # Yield final assembled tool calls
-        assembled = [
-            {"name": tb["name"], "arguments": json.loads(tb["arguments"]) if tb["arguments"] else {}}
-            for tb in tool_blocks.values()
-            if tb["name"]
-        ]
+        # Yield final assembled tool calls (toleran: argumen korup -> {}).
+        assembled = []
+        for tb in tool_blocks.values():
+            if not tb["name"]:
+                continue
+            try:
+                args = json.loads(tb["arguments"]) if tb["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            assembled.append({"id": tb.get("id", ""), "name": tb["name"], "arguments": args})
         yield ModelStreamChunk(content="", tool_calls=assembled, finished=True, usage=usage if "usage" in dir() else {})
 
     async def health_check(self):

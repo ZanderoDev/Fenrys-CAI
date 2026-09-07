@@ -1,4 +1,7 @@
-"""Fenrys REPL — Hermes-style scrollback chat (prompt_toolkit + Rich).
+"""Fenrys REPL — scrollback chat in the Claude Code / Codex / Hermes mold
+(prompt_toolkit + Rich). Turns read top-to-bottom as plain terminal text:
+"› " for what you typed, "⏺" for an action Fenrys takes (tool call or
+delegation), "⎿" for that action's result, indented underneath it.
 
 Everything printed here is plain terminal scrollback, so mouse-drag +
 Ctrl+Shift+C, tmux copy-mode, and terminal search all work — including flags.
@@ -117,7 +120,7 @@ def fenrys_version() -> str:
     with suppress(Exception):
         from importlib.metadata import version
         return version("fenrys-cai")
-    return "0.1.0"
+    return "2.2.0-beta"
 
 
 def load_dotenv(config: ConfigManager) -> None:
@@ -413,34 +416,48 @@ class FenrysREPL:
         self._set_title(prompt)
         self._tlog("user", prompt)
         self.console.print(Rule(style="dim"))
-        self.console.print(f"[bold cyan]●[/bold cyan] {prompt[:160]}"
-                           f"{'…' if len(prompt) > 160 else ''}")
+        lines = prompt.splitlines() or [""]
+        head = lines[0][:120]
+        extra = f" · +{len(lines) - 1} lines" if len(lines) > 1 else ""
+        self.console.print(f"[bold]›[/bold] {head}{extra}")
         buf: list[str] = []
         t0 = time.monotonic()
 
+        _mode = {"reasoning": False}
+
         async def on_token(chunk: str) -> None:
+            if _mode["reasoning"]:
+                sys.stdout.write("\n")
+                _mode["reasoning"] = False
             buf.append(chunk)
             sys.stdout.write(chunk)
             sys.stdout.flush()
 
+        async def on_reasoning(text: str) -> None:
+            _mode["reasoning"] = True
+            self.console.print(text, end="", style="dim", highlight=False, soft_wrap=True)
+
         async def on_event(kind: str, payload: str) -> None:
             if kind == "delegate":
-                self.console.print(f"\n[magenta]↳ {payload}[/magenta]")
+                self.console.print(f"\n[bold magenta]⏺[/bold magenta] delegate → {payload}")
             elif kind == "tool":
-                self.console.print(f"\n[cyan]⚙ {payload}[/cyan]")
+                self.console.print(f"\n[bold cyan]⏺[/bold cyan] {payload}")
             elif kind == "result":
-                self.console.print(f"[green]✓ {payload}[/green]")
+                if "failed" in payload or "blocked" in payload:
+                    self.console.print(f"  [dim]⎿[/dim] [yellow]{payload}[/yellow]")
+                else:
+                    self.console.print(f"  [dim]⎿[/dim] [green]{payload}[/green]")
             elif kind == "error":
-                self.console.print(f"[red]! {payload}[/red]")
+                self.console.print(f"  [dim]⎿[/dim] [bold red]{payload}[/bold red]")
 
         async def on_usage(u: dict) -> None:
             self._add_usage(u)
 
-        self._status_line("● thinking")
+        self._status_line("⏺ thinking…")
         self._turn_task = asyncio.create_task(
             self.runtime.run_chat_streaming(
                 session, prompt, on_token=on_token, on_event=on_event,
-                on_usage=on_usage,
+                on_usage=on_usage, on_reasoning=on_reasoning,
             )
         )
         try:
@@ -462,6 +479,10 @@ class FenrysREPL:
         sys.stdout.write("\n")
         sys.stdout.flush()
         final = (result.summary or "").strip()
+        if not buf and final:
+            # Nothing streamed (direct reply, empty stream) — print it,
+            # otherwise the answer is invisible.
+            self.console.print(final)
         self._last_answer = final or None
         self._tlog("assistant", final)
         self._scan_flags(final)
