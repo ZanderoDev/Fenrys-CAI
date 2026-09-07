@@ -29,8 +29,9 @@ class MCPClient:
 class StdioMCPClient:
     """Small MCP stdio transport for the upstream hexstrike_mcp.py process."""
 
-    def __init__(self, command: list[str], startup_timeout: float = 15):
+    def __init__(self, command: list[str], startup_timeout: float = 15, stream_limit: int = 16 * 1024 * 1024):
         self.command = command
+        self.stream_limit = stream_limit
         self.startup_timeout = startup_timeout
         self.process: asyncio.subprocess.Process | None = None
         self._request_id = 0
@@ -45,11 +46,12 @@ class StdioMCPClient:
             self.process = await asyncio.create_subprocess_exec(
                 *self.command, stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                limit=self.stream_limit,
             )
             await self._request_unlocked("initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "fenrys-cai", "version": "0.1.0"},
+                "clientInfo": {"name": "fenrys-cai", "version": "2.2.0-beta"},
             })
             await self.notify("notifications/initialized", {})
 
@@ -71,11 +73,12 @@ class StdioMCPClient:
         self.process = await asyncio.create_subprocess_exec(
             *self.command, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            limit=self.stream_limit,
         )
         await self._request_unlocked("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "fenrys-cai", "version": "0.1.0"},
+            "clientInfo": {"name": "fenrys-cai", "version": "2.2.0-beta"},
         })
         await self.notify("notifications/initialized", {})
 

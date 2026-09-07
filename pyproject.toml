@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fenrys-cai"
-version = "0.9.0"
+version = "2.2.0b0"
 description = "Fenrys-CAI: local-first multi-agent cybersecurity terminal operator"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"

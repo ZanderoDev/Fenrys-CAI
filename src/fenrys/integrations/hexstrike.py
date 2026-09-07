@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 import time
 from typing import Any
 
@@ -8,6 +10,94 @@ import httpx
 from fenrys.evidence.manager import EvidenceManager
 from fenrys.models import NormalizedToolResult
 from .mcp import StdioMCPClient
+
+# ANSI escape sequences (colour/reset) that HexStrike's ModernVisualEngine injects
+# into stdout. The LLM must never see these: they are pure terminal noise and
+# waste context on every scan. Strip CSI + OSC + two-byte SGR sequences.
+_ANSI_RE = re.compile(
+    r"\x1b\[[0-9;:]*[A-Za-z]"
+    r"|\x1b\][^\x07]*(?:\x07|\x1b\\)"
+    r"|\x1b[()][0-9A-B]"
+)
+
+# Response keys that carry the primary text payload of a HexStrike result,
+# tried in priority order. `stdout` first because execute_command returns it.
+_TEXT_KEYS = ("stdout", "output", "result", "message", "analysis", "error")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI control sequences from terminal output."""
+    return _ANSI_RE.sub("", text)
+
+
+def _stringify(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, indent=2, default=str, ensure_ascii=False)
+    return str(value)
+
+
+def _truncate(text: str, limit: int = 6000) -> str:
+    """Hard cap so a single tool result can never overflow the LLM context."""
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n[...truncated {len(text) - limit} chars by Fenrys...]"
+
+
+def extract_output(body: dict[str, Any]) -> tuple[str, bool, int | None]:
+    """Pull clean, ANSI-free text out of a HexStrike JSON response.
+
+    Returns (text, success, exit_code). Handles three response families:
+      1. execute_command style: {stdout, stderr, success, return_code}
+      2. structured analyzers: {success, analysis:{...}, cve_monitoring:{...}}
+      3. plain wrappers: {success, result/output/message}
+    stderr is merged only when stdout is empty, so failures are never silent.
+    """
+    body = body or {}
+
+    # stderr is evidence of failure; always surface it if there's no stdout.
+    stdout = body.get("stdout")
+    stderr = body.get("stderr")
+    error = body.get("error")
+
+    success = bool(body.get("success", True))
+    exit_code = None
+    for key in ("return_code", "returncode", "exit_code"):
+        if body.get(key) is not None:
+            exit_code = body[key]
+            break
+    if exit_code is not None:
+        try:
+            exit_code = int(exit_code)
+        except (TypeError, ValueError):
+            exit_code = None
+
+    parts: list[str] = []
+    if stdout not in (None, ""):
+        parts.append(strip_ansi(_stringify(stdout)))
+    if stderr not in (None, ""):
+        parts.append("[stderr]\n" + strip_ansi(_stringify(stderr)))
+    if not parts:
+        # No stdout/stderr: structured result. Prefer nested analysis blocks,
+        # falling back to a compact dump of the whole body (minus metadata).
+        nested = None
+        for key in _TEXT_KEYS:
+            value = body.get(key)
+            if value not in (None, ""):
+                nested = value
+                break
+        if nested is None:
+            filtered = {k: v for k, v in body.items()
+                        if k not in {"timestamp", "success"}}
+            nested = filtered or body
+        parts.append(strip_ansi(_stringify(nested)))
+    if error and error not in (None, "") and not success:
+        parts.append("[error]\n" + strip_ansi(_stringify(error)))
+
+    return _truncate("\n".join(parts).strip()), success, exit_code
 
 
 # Hardcoded tool endpoint mapping from Fenrys tool names to HexStrike REST API
@@ -110,10 +200,46 @@ TOOL_ENDPOINTS: dict[str, str] = {
     "execute_command": "/api/command",
 
     # ─── OSINT ───
-    "sherlock": "/api/tools/sherlock",
+    # NOTE: /api/tools/sherlock and /api/tools/recon-ng DO NOT EXIST on the
+    # upstream server (verified 404). Route both through the generic command
+    # endpoint so the OSINT agent stays functional.
+    "sherlock": "/api/command",
+    "recon-ng": "/api/command",
 
     # ─── Reporting ───
     "create_scan_summary": "/api/visual/summary-report",
+
+    # ─── CTF Auto-Solvers (upstream /api/ctf/*) ───
+    "ctf_cryptography_solver": "/api/ctf/cryptography-solver",
+    "ctf_forensics_analyzer": "/api/ctf/forensics-analyzer",
+    "ctf_binary_analyzer": "/api/ctf/binary-analyzer",
+    "ctf_auto_solve_challenge": "/api/ctf/auto-solve-challenge",
+    "ctf_suggest_tools": "/api/ctf/suggest-tools",
+    "ctf_team_strategy": "/api/ctf/team-strategy",
+
+    # ─── Intelligence Planning (upstream /api/intelligence/*) ───
+    "intel_analyze_target": "/api/intelligence/analyze-target",
+    "intel_select_tools": "/api/intelligence/select-tools",
+    "intel_optimize_parameters": "/api/intelligence/optimize-parameters",
+    "intel_create_attack_chain": "/api/intelligence/create-attack-chain",
+    "intel_smart_scan": "/api/intelligence/smart-scan",
+    "intel_technology_detection": "/api/intelligence/technology-detection",
+
+    # ─── Bug Bounty Workflows (upstream /api/bugbounty/*) ───
+    "bugbounty_recon": "/api/bugbounty/reconnaissance-workflow",
+    "bugbounty_vuln_hunt": "/api/bugbounty/vulnerability-hunting-workflow",
+    "bugbounty_business_logic": "/api/bugbounty/business-logic-workflow",
+    "bugbounty_osint": "/api/bugbounty/osint-workflow",
+    "bugbounty_file_upload": "/api/bugbounty/file-upload-testing",
+    "bugbounty_comprehensive": "/api/bugbounty/comprehensive-assessment",
+}
+
+# Tools whose ONLY upstream capability is a raw shell command (no dedicated
+# endpoint). invoke() wraps these by shell-quoting the tool's natural argument.
+# Key = fenrys tool name, value = template with a {0} placeholder for the target.
+_COMMAND_TOOL_TEMPLATES: dict[str, str] = {
+    "sherlock": "sherlock {0}",
+    "recon-ng": "recon-ng {0}",
 }
 
 
@@ -168,10 +294,26 @@ class HexStrikeAdapter:
                     output = "\n".join(chunks)
                 if not isinstance(output, str):
                     output = str(output)
-                return self._normalize(tool, output, not bool(result.get("isError")),
-                                       started, session_id)
-            except Exception:
-                await self.mcp.close()
+                is_error = bool(result.get("isError"))
+                low = output.lower()
+                # MCP bridges often answer "Unknown tool" for tools they do not
+                # serve without raising or setting isError. Those tools may still
+                # exist on the HexStrike REST API, so fall back instead of giving up.
+                if not is_error and ("unknown tool" in low or "tool not found" in low
+                                     or "not registered" in low):
+                    is_error = True
+                if is_error:
+                    raise RuntimeError(output[:200])
+                self.transport = "mcp"  # transport aktual yang berhasil dipakai
+                return self._normalize(tool, output, True, started, session_id)
+            except Exception as exc:
+                msg = str(exc).lower()
+                # "Unknown tool" means this bridge doesn't serve the tool but the
+                # REST API may; keep MCP alive for its own tools and fall through.
+                if "unknown tool" not in msg and "tool not found" not in msg and "not registered" not in msg:
+                    await self.mcp.close()
+                    self.mcp = None  # fatal: jangan coba MCP lagi, pakai REST
+                self.transport = "rest"
 
         # Fallback to REST API
         endpoint = TOOL_ENDPOINTS.get(tool)
@@ -182,27 +324,65 @@ class HexStrikeAdapter:
         try:
             async with httpx.AsyncClient(timeout=300) as client:
                 if endpoint == "/api/command":
-                    response = await client.post(f"{self.base_url}{endpoint}",
-                                                 json={"command": arguments.get("command", "")})
+                    # Generic shell execution, or a command-template tool
+                    # (sherlock/recon-ng) that has no dedicated upstream endpoint.
+                    command = arguments.get("command") or self._command_from_template(
+                        tool, arguments
+                    )
+                    if not command:
+                        return self._normalize(
+                            tool, "", False, started, session_id,
+                            error="command is required",
+                        )
+                    response = await client.post(
+                        f"{self.base_url}{endpoint}", json={"command": command}
+                    )
                 else:
                     response = await client.post(f"{self.base_url}{endpoint}", json=arguments)
-                body = response.json()
                 response.raise_for_status()
+                try:
+                    body = response.json()
+                except Exception:
+                    text = (response.text or "").strip()
+                    body = {"stdout": text[:4000] or "(empty non-JSON response)",
+                            "success": True}
 
-            output = body.get("output") or body.get("stdout") or body.get("result") or str(body)
-            if not isinstance(output, str):
-                output = str(output)
-            success = bool(body.get("success", True))
-            exit_code = body.get("returncode") or body.get("exit_code")
+            output, success, exit_code = extract_output(body)
+            # A non-2xx JSON error body may still be `success: False`; the
+            # raise_for_status above already covers hard HTTP errors.
+            if output == "" and success is False:
+                output = body.get("error") or "(tool returned no output)"
 
             return self._normalize(tool, output, success, started, session_id,
                                    exit_code=exit_code)
         except httpx.HTTPStatusError as exc:
+            # Extract the server's own error message when present.
+            detail = ""
+            try:
+                detail = str(exc.response.json().get("error", ""))[:200]
+            except Exception:
+                detail = str(exc)[:200]
             return self._normalize(tool, "", False, started, session_id,
-                                   error=f"HTTP {exc.response.status_code}: {str(exc)[:200]}")
+                                   error=f"HTTP {exc.response.status_code}: {detail}")
         except Exception as exc:
             return self._normalize(tool, "", False, started, session_id,
                                    error=f"{type(exc).__name__}: {str(exc)[:200]}")
+
+    def _command_from_template(self, tool: str, arguments: dict[str, Any]) -> str:
+        """Build a shell command for command-template tools (sherlock/recon-ng)."""
+        template = _COMMAND_TOOL_TEMPLATES.get(tool)
+        if not template:
+            return ""
+        # Sherlock wants a username; recon-ng a module or command.
+        if tool == "sherlock":
+            target = arguments.get("username") or arguments.get("target") or ""
+            extra = arguments.get("additional_args") or ""
+        else:
+            target = arguments.get("command") or arguments.get("module") or ""
+            extra = arguments.get("additional_args") or ""
+        if not target:
+            return ""
+        return f"{template.format(target)} {extra}".strip()
 
     def _normalize(self, tool: str, output: str, success: bool, started: float,
                    session_id: str | None, exit_code: int | None = None,

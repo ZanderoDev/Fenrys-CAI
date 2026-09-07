@@ -1,10 +1,36 @@
 from __future__ import annotations
 
+import re
 import shutil
 from dataclasses import asdict, dataclass
 from typing import Any
 
 from fenrys.models import ToolSpec
+
+# Short domain acronyms that must survive prompt-term extraction even though
+# they are <= 3 chars (the generic length filter would drop xss/sql/smb/...).
+TOOL_TERM_WHITELIST = frozenset({
+    "xss", "sql", "sqli", "ssti", "smb", "ftp", "ssh", "dns", "cve", "rce",
+    "lfi", "rfi", "csrf", "xsrf", "jwt", "api", "url", "uri", "ip", "os",
+    "elf", "pe", "pcap", "md5", "sha", "rsa", "aes", "des", "xor", "tcp",
+    "udp", "http", "https", "www", "nmap", "dir", "cms", "ssl", "tls",
+    "otp", "totp", "b64", "php", "js", "dom", "xxe", "sst",
+})
+
+
+def extract_terms(prompt: str) -> set[str]:
+    """Prompt words usable for tool matching: len>=3 plus whitelisted acronyms."""
+    terms = set()
+    for raw in re.findall(r"[a-z0-9_]+", prompt.lower()):
+        if len(raw) >= 3 or raw in TOOL_TERM_WHITELIST:
+            terms.add(raw)
+    return terms
+
+
+def score_terms(haystack: str, terms: set[str]) -> int:
+    """Count how many terms appear in a tool's name+description."""
+    text = haystack.lower()
+    return sum(1 for term in terms if term in text)
 
 AGENT_FOCUS = {
     "recon": "network discovery, ports, services, DNS, subdomains, HTTP probing",
@@ -153,6 +179,17 @@ HEXSTRIKE_TOOLS: dict[str, dict[str, Any]] = {
                 "domain": {"type": "string", "description": "Target domain"},
                 "dns_server": {"type": "string", "default": ""},
                 "wordlist": {"type": "string", "default": ""},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["domain"]
+        }
+    },
+    "fierce_scan": {
+        "description": "Fierce DNS enumeration and subdomain discovery",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"},
                 "additional_args": {"type": "string", "default": ""}
             },
             "required": ["domain"]
@@ -360,12 +397,67 @@ HEXSTRIKE_TOOLS: dict[str, dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "domain": {"type": "string", "description": "Target domain"},
-                "level": {"type": "string", "default": "medium"},
+                "level": {"type": "integer", "default": 2, "description": "Crawl depth level"},
                 "exclude": {"type": "string", "default": ""},
                 "output": {"type": "string", "default": ""},
                 "additional_args": {"type": "string", "default": ""}
             },
             "required": ["domain"]
+        }
+    },
+    "dirb_scan": {
+        "description": "DIRB web content scanner",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Target URL"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["url"]
+        }
+    },
+    "wfuzz_scan": {
+        "description": "Wfuzz web fuzzer for parameters and paths",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Target URL with FUZZ keyword"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["url"]
+        }
+    },
+    "xsser_scan": {
+        "description": "XSSer automated XSS detection and exploitation",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "Target URL"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["url"]
+        }
+    },
+    "dotdotpwn_scan": {
+        "description": "DotDotPwn directory traversal fuzzer",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host or URL"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "jaeles_vulnerability_scan": {
+        "description": "Jaeles signature-based vulnerability scanner",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target URL or host"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
         }
     },
 
@@ -428,6 +520,28 @@ HEXSTRIKE_TOOLS: dict[str, dict[str, Any]] = {
                 "password": {"type": "string", "default": ""},
                 "domain": {"type": "string", "default": ""},
                 "commands": {"type": "string", "default": "enumdomusers"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "enum4linux_scan": {
+        "description": "Enum4linux SMB/NetBIOS enumeration",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "responder_credential_harvest": {
+        "description": "Responder LLMNR/NBT-NS poisoner for credential harvest",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target interface or host"},
                 "additional_args": {"type": "string", "default": ""}
             },
             "required": ["target"]
@@ -587,6 +701,50 @@ HEXSTRIKE_TOOLS: dict[str, dict[str, Any]] = {
                 "find_address": {"type": "string", "default": ""},
                 "avoid_addresses": {"type": "string", "default": ""},
                 "analysis_type": {"type": "string", "default": "symbolic"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["binary"]
+        }
+    },
+    "ropgadget_search": {
+        "description": "ROPgadget search for ROP/JOP gadgets in binaries",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary": {"type": "string", "description": "Path to binary"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["binary"]
+        }
+    },
+    "one_gadget_search": {
+        "description": "One-gadget finder for libc exploitation",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Path to libc binary"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "libc_database_lookup": {
+        "description": "Libc database lookup for offsets and symbols",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Leaked address or libc id"},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "pwninit_setup": {
+        "description": "Pwninit exploit template setup for binaries",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary": {"type": "string", "description": "Path to binary"},
                 "additional_args": {"type": "string", "default": ""}
             },
             "required": ["binary"]
@@ -903,31 +1061,287 @@ HEXSTRIKE_TOOLS: dict[str, dict[str, Any]] = {
             "required": ["target", "tools_used"]
         }
     },
+
+    # ─── CTF Auto-Solvers (/api/ctf/*) ───
+    "ctf_cryptography_solver": {
+        "description": "Analyze a cipher/ciphertext: identify encoding, hashes, "
+                       "substitution/ROT/RSA/Vigenere, and recommend cracking tools",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cipher_text": {"type": "string", "description": "Ciphertext or hash to analyze"},
+                "cipher_type": {"type": "string", "default": "unknown",
+                                "description": "unknown|caesar|vigenere|substitution|rsa|hash"},
+                "key_hint": {"type": "string", "default": ""},
+                "known_plaintext": {"type": "string", "default": ""},
+                "additional_info": {"type": "string", "default": ""}
+            },
+            "required": ["cipher_text"]
+        }
+    },
+    "ctf_forensics_analyzer": {
+        "description": "Forensics analysis of a file: metadata, hidden data, "
+                       "steganography, and interesting strings",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Path to the artifact"},
+                "analysis_type": {"type": "string", "default": "comprehensive"},
+                "extract_hidden": {"type": "boolean", "default": True},
+                "check_steganography": {"type": "boolean", "default": True}
+            },
+            "required": ["file_path"]
+        }
+    },
+    "ctf_binary_analyzer": {
+        "description": "Reverse-engineering/pwn analysis of a binary: protections, "
+                       "strings, ROP gadgets, and exploitation hints",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "binary_path": {"type": "string", "description": "Path to the binary"},
+                "analysis_depth": {"type": "string", "default": "comprehensive",
+                                   "description": "basic|comprehensive|deep"},
+                "check_protections": {"type": "boolean", "default": True},
+                "find_gadgets": {"type": "boolean", "default": True}
+            },
+            "required": ["binary_path"]
+        }
+    },
+    "ctf_auto_solve_challenge": {
+        "description": "Attempt automated solving of a CTF challenge",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Challenge name"},
+                "category": {"type": "string", "default": "misc"},
+                "difficulty": {"type": "string", "default": "unknown"},
+                "points": {"type": "integer", "default": 100},
+                "description": {"type": "string", "default": ""},
+                "target": {"type": "string", "default": ""}
+            },
+            "required": ["name"]
+        }
+    },
+    "ctf_suggest_tools": {
+        "description": "Suggest the best tools for a CTF challenge by description/category",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "Challenge description"},
+                "category": {"type": "string", "default": "misc"}
+            },
+            "required": ["description"]
+        }
+    },
+    "ctf_team_strategy": {
+        "description": "Generate an optimal CTF team strategy from a challenge list",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "challenges": {"type": "array", "description": "List of challenge objects",
+                               "items": {"type": "object"}},
+                "team_skills": {"type": "object", "default": {}}
+            },
+            "required": ["challenges"]
+        }
+    },
+
+    # ─── Intelligence Planning (/api/intelligence/*) ───
+    "intel_analyze_target": {
+        "description": "Build a full target profile (type, tech stack, risk) via decision engine",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Host, URL, or IP to profile"}
+            },
+            "required": ["target"]
+        }
+    },
+    "intel_select_tools": {
+        "description": "Ask the decision engine which tools are optimal for a target",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host/URL"},
+                "objective": {"type": "string", "default": "comprehensive",
+                              "description": "comprehensive|quick|stealth"}
+            },
+            "required": ["target"]
+        }
+    },
+    "intel_optimize_parameters": {
+        "description": "Get optimized parameters for a tool against a target",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host/URL"},
+                "tool": {"type": "string", "description": "Tool name to optimize"},
+                "context": {"type": "object", "default": {}}
+            },
+            "required": ["target", "tool"]
+        }
+    },
+    "intel_create_attack_chain": {
+        "description": "Generate a multi-step attack chain for a target",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host/URL"},
+                "objective": {"type": "string", "default": "comprehensive"}
+            },
+            "required": ["target"]
+        }
+    },
+    "intel_smart_scan": {
+        "description": "Run an adaptive smart scan that tunes itself to the target",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host/URL"},
+                "scan_type": {"type": "string", "default": "auto"},
+                "mode": {"type": "string", "default": "balanced"},
+                "ports": {"type": "string", "default": ""},
+                "severity": {"type": "string", "default": ""},
+                "tags": {"type": "string", "default": ""},
+                "wordlist": {"type": "string", "default": ""},
+                "additional_args": {"type": "string", "default": ""}
+            },
+            "required": ["target"]
+        }
+    },
+    "intel_technology_detection": {
+        "description": "Detect technologies/fingerprint of a target",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "Target host/URL"}
+            },
+            "required": ["target"]
+        }
+    },
+
+    # ─── Bug Bounty Workflows (/api/bugbounty/*) ───
+    "bugbounty_recon": {
+        "description": "Full bug bounty reconnaissance workflow for a domain",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"},
+                "scope": {"type": "array", "default": [], "items": {"type": "string"}},
+                "out_of_scope": {"type": "array", "default": [], "items": {"type": "string"}},
+                "program_type": {"type": "string", "default": "web"}
+            },
+            "required": ["domain"]
+        }
+    },
+    "bugbounty_vuln_hunt": {
+        "description": "Priority vulnerability hunting workflow (RCE/SQLi/XSS/IDOR/SSRF)",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"},
+                "priority_vulns": {"type": "array", "default": ["rce", "sqli", "xss", "idor", "ssrf"],
+                                   "items": {"type": "string"}},
+                "bounty_range": {"type": "string", "default": "unknown"}
+            },
+            "required": ["domain"]
+        }
+    },
+    "bugbounty_business_logic": {
+        "description": "Business logic testing workflow for a domain",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"},
+                "program_type": {"type": "string", "default": "web"}
+            },
+            "required": ["domain"]
+        }
+    },
+    "bugbounty_osint": {
+        "description": "OSINT workflow for a domain",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"}
+            },
+            "required": ["domain"]
+        }
+    },
+    "bugbounty_file_upload": {
+        "description": "File upload testing workflow for a target URL",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "target_url": {"type": "string", "description": "Upload endpoint URL"}
+            },
+            "required": ["target_url"]
+        }
+    },
+    "bugbounty_comprehensive": {
+        "description": "Comprehensive bug bounty assessment for a domain",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {"type": "string", "description": "Target domain"},
+                "scope": {"type": "array", "default": [], "items": {"type": "string"}},
+                "priority_vulns": {"type": "array", "default": ["rce", "sqli", "xss", "idor", "ssrf"],
+                                   "items": {"type": "string"}},
+                "include_osint": {"type": "boolean", "default": True},
+                "include_business_logic": {"type": "boolean", "default": True}
+            },
+            "required": ["domain"]
+        }
+    },
 }
 
 # Agent to tool mapping
 AGENT_TOOL_NAMES: dict[str, list[str]] = {
     "recon": ["nmap_scan", "nmap_advanced_scan", "rustscan_fast_scan", "masscan_high_speed",
               "amass_scan", "subfinder_scan", "httpx_probe", "autorecon_comprehensive",
-              "arp_scan_discovery", "dnsenum_scan"],
+              "arp_scan_discovery", "dnsenum_scan", "fierce_scan"],
     "web": ["katana_crawl", "ffuf_scan", "nuclei_scan", "sqlmap_scan", "dalfox_xss_scan",
             "nikto_scan", "dirsearch_scan", "feroxbuster_scan", "wafw00f_scan",
             "hakrawler_crawl", "gau_discovery", "waybackurls_discovery",
-            "arjun_parameter_discovery", "paramspider_mining"],
+            "arjun_parameter_discovery", "paramspider_mining",
+            "dirb_scan", "wfuzz_scan", "xsser_scan", "dotdotpwn_scan",
+            "jaeles_vulnerability_scan"],
     "network": ["smbmap_scan", "enum4linux_ng_advanced", "netexec_scan",
-                "rpcclient_enumeration", "nbtscan_netbios", "arp_scan_discovery"],
+                "rpcclient_enumeration", "nbtscan_netbios", "arp_scan_discovery",
+                "enum4linux_scan", "responder_credential_harvest"],
     "pwn": ["checksec_analyze", "gdb_analyze", "pwntools_exploit", "ropper_gadget_search",
             "radare2_analyze", "objdump_analyze", "binwalk_analyze", "xxd_hexdump",
-            "strings_extract", "ghidra_analysis", "angr_symbolic_execution"],
+            "strings_extract", "ghidra_analysis", "angr_symbolic_execution",
+            "ropgadget_search", "one_gadget_search", "libc_database_lookup",
+            "pwninit_setup"],
     "forensics": ["binwalk_analyze", "exiftool_extract", "volatility3_analyze",
                   "foremost_carving", "steghide_analysis", "strings_extract",
-                  "xxd_hexdump", "hashcat_crack", "john_crack"],
-    "osint": ["sherlock", "amass_scan", "subfinder_scan", "httpx_probe", "recon-ng"],
+                  "xxd_hexdump", "hashcat_crack", "john_crack",
+                  "ctf_forensics_analyzer"],
+    "osint": ["sherlock", "amass_scan", "subfinder_scan", "httpx_probe", "recon-ng",
+              "bugbounty_osint", "bugbounty_recon"],
     "vulnintel": ["nuclei_scan", "monitor_cve_feeds", "generate_exploit_from_cve",
-                  "discover_attack_chains", "correlate_threat_intelligence"],
-    "crypto": ["execute_python_script", "hashcat_crack", "john_crack", "hashpump_attack"],
+                  "discover_attack_chains", "correlate_threat_intelligence",
+                  "intel_analyze_target", "intel_select_tools", "intel_create_attack_chain",
+                  "intel_smart_scan", "bugbounty_vuln_hunt", "bugbounty_comprehensive"],
+    "crypto": ["execute_python_script", "hashcat_crack", "john_crack", "hashpump_attack",
+               "ctf_cryptography_solver"],
     "misc": ["execute_python_script", "execute_command", "create_file", "list_files",
-             "strings_extract"],
+             "strings_extract", "ctf_auto_solve_challenge", "ctf_suggest_tools"],
+}
+
+# Tools whose arguments must be coerced by the orchestrator before hitting the
+# REST adapter. The LLM is allowed to think in the registry's friendly name;
+# the adapter renames to the upstream key at the last moment.
+_ARG_ALIASES: dict[str, dict[str, str]] = {
+    "john_crack": {"format_type": "format"},
+    "msfvenom_generate": {"format_type": "format"},
+    "netexec_scan": {"hash_value": "hash"},
+    "responder_credential_harvest": {"target": "interface"},
+    "one_gadget_search": {"target": "libc_path"},
+    "libc_database_lookup": {"target": "libc_id"},
+    "jaeles_vulnerability_scan": {"target": "url"},
 }
 
 
@@ -985,6 +1399,8 @@ class ToolRegistry:
 
     def profile_for(self, agent: str, limit: int = 40) -> list[ToolSpec]:
         """Return tools for a specific agent, using hardcoded HEXSTRIKE_TOOLS schemas."""
+        if agent not in AGENT_TOOL_NAMES:
+            return []
         selected: list[ToolSpec] = []
         seen: set[str] = set()
 
@@ -993,6 +1409,7 @@ class ToolRegistry:
             if name in self.specs and name not in seen:
                 selected.append(self.specs[name])
                 seen.add(name)
+        selected = selected[:max(0, limit)]
 
         # Then, add related tools by relevance scoring
         focus = AGENT_FOCUS.get(agent, "general cybersecurity analysis")
@@ -1011,3 +1428,19 @@ class ToolRegistry:
 
     def status(self) -> dict[str, dict[str, bool]]:
         return {name: asdict(value) for name, value in sorted(self.tools.items())}
+
+    def profile_for_task(self, agent: str, objective: str, limit: int = 16) -> list[ToolSpec]:
+        """Agent's tools ranked by the specific task objective (not just static category)."""
+        specs = [self.specs[name] for name in AGENT_TOOL_NAMES.get(agent, []) if name in self.specs]
+        terms = extract_terms(objective)
+        if not terms:
+            return specs[:limit]
+        ranked = sorted(
+            specs,
+            key=lambda spec: (score_terms(f"{spec.name} {spec.description}", terms), spec.name),
+            reverse=True,
+        )
+        matched = [spec for spec in ranked
+                   if score_terms(f"{spec.name} {spec.description}", terms) > 0]
+        rest = [spec for spec in specs if spec not in matched]
+        return (matched + rest)[:limit]

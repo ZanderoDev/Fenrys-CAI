@@ -52,7 +52,10 @@ class StreamingChat(Widget):
         if kind == "tool":
             self._get_log().write(f"[cyan]\u2699 {payload}[/cyan]")
         elif kind == "result":
-            self._get_log().write(f"[green]\u2713 {payload}[/green]")
+            if "failed" in payload or "blocked" in payload:
+                self._get_log().write(f"[yellow]\u2717 {payload}[/yellow]")
+            else:
+                self._get_log().write(f"[green]\u2713 {payload}[/green]")
         elif kind == "delegate":
             self._get_log().write(f"[magenta]\u2514 {payload}[/magenta]")
         elif kind == "error":
