@@ -234,7 +234,12 @@ async def test_streaming_exhausted_turn_is_explicit(tmp_path):
 def test_parse_tool_call_handles_string_and_broken_args():
     name, args = parse_tool_call({"function": {"name": "nmap_scan", "arguments": '{"target": "x"}'}})
     assert (name, args) == ("nmap_scan", {"target": "x"})
+    # JSON rusak (terpotong) tidak boleh diam-diam jadi {}: harus ditandai agar
+    # model mendapat umpan balik jelas, bukan HTTP 400 membingungkan.
     name, args = parse_tool_call({"name": "t", "arguments": "not-json{{{"})
+    assert name == "t" and args.get("__malformed_args__")
+    # Argumen string kosong tetap dict kosong.
+    name, args = parse_tool_call({"name": "t", "arguments": ""})
     assert (name, args) == ("t", {})
 
 

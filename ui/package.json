@@ -1,6 +1,6 @@
 {
   "name": "fenrys-tui",
-  "version": "2.2.0-beta",
+  "version": "2.3.0",
   "description": "Fenrys-CAI terminal UI powered by React Ink",
   "type": "module",
   "main": "dist/index.js",

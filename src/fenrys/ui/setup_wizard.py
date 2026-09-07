@@ -34,6 +34,8 @@ PRESETS = {
                  "api_key_env": "DEEPSEEK_API_KEY", "model": "deepseek-chat"},
     "vexacode": {"type": "custom", "base_url": "https://ai.vexacode.id/v1",
                  "api_key_env": "VEXACODE_API_KEY", "model": ""},
+    "lapakvip": {"type": "openai_compatible", "base_url": "https://router.lapakvip.com/api/v1",
+                 "api_key_env": "LAPAKVIP_API_KEY", "model": "lv/claude-sonnet-4.5"},
     "local_ollama": {"type": "openai_compatible", "base_url": "http://127.0.0.1:11434/v1",
                      "api_key_env": None, "model": "llama3.1"},
 }

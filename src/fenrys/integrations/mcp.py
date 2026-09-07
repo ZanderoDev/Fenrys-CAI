@@ -51,7 +51,7 @@ class StdioMCPClient:
             await self._request_unlocked("initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "fenrys-cai", "version": "2.2.0-beta"},
+                "clientInfo": {"name": "fenrys-cai", "version": "2.3.0"},
             })
             await self.notify("notifications/initialized", {})
 
@@ -78,7 +78,7 @@ class StdioMCPClient:
         await self._request_unlocked("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "fenrys-cai", "version": "2.2.0-beta"},
+            "clientInfo": {"name": "fenrys-cai", "version": "2.3.0"},
         })
         await self.notify("notifications/initialized", {})
 

@@ -92,14 +92,43 @@ class ModelStreamChunk:
 TURN_EXHAUSTED_MARKER = "[dihentikan: batas turn tercapai]"
 
 
+_MALFORMED_ARGS_KEY = "__malformed_args__"
+
+
+def _parse_json_object(raw: str) -> dict[str, Any] | None:
+    """Tolerant JSON-object parse.
+
+    Accepts a complete object even when trailing garbage follows (some relays
+    append notes after the JSON). Returns None when no valid object exists.
+    """
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        pass
+    try:
+        obj, _ = json.JSONDecoder().raw_decode(raw.lstrip())
+        return obj if isinstance(obj, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 def parse_tool_call(call: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    """Split a raw tool call into (name, arguments). Single shared helper."""
+    """Split a raw tool call into (name, arguments). Single shared helper.
+
+    Malformed (typically output-truncated) JSON is NOT silently turned into an
+    empty dict — that would make the upstream tool reply with a confusing
+    "field is required" 400. Instead it is surfaced under _MALFORMED_ARGS_KEY so
+    handlers can tell the model the tool-call was cut and to retry concisely.
+    """
     function = call.get("function") or {}
     name = call.get("name") or function.get("name") or ""
     arguments = call.get("arguments") or function.get("arguments") or {}
     if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except json.JSONDecodeError:
-            arguments = {}
+        if arguments.strip():
+            parsed = _parse_json_object(arguments)
+            if parsed is not None:
+                return str(name), parsed
+            return str(name), {_MALFORMED_ARGS_KEY: arguments[:300]}
+        arguments = {}
     return str(name), arguments if isinstance(arguments, dict) else {}
