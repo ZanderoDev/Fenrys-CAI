@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/fenrys-banner.jpg" alt="Fenrys-CAI" width="100%" />
+</p>
+
 # Fenrys-CAI
 
 Fenrys-CAI is a local-first, terminal-first multi-agent cybersecurity operator. It

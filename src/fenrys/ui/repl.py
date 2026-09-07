@@ -120,7 +120,7 @@ def fenrys_version() -> str:
     with suppress(Exception):
         from importlib.metadata import version
         return version("fenrys-cai")
-    return "2.2.0-beta"
+    return "2.3.0"
 
 
 def load_dotenv(config: ConfigManager) -> None:

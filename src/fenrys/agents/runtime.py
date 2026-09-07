@@ -426,6 +426,10 @@ class InvestigationRuntime:
                 return f"unknown HexStrike tool: {name}", False
             if not isinstance(arguments, dict):
                 arguments = {}
+            if arguments.get("__malformed_args__"):
+                return ("tool-call args rusak/terpotong: JSON argumen tidak valid "
+                        "(umumnya output model terpotong oleh batas token). Kirim ulang "
+                        "panggilan tool dengan argumen ringkas dan lengkap."), False
             if (name in EXPLICIT_APPROVAL_TOOLS and not self._mode_allows_exploit(session.get("mode"))
                     and arguments.get("explicit_approval") is not True):
                 return (f"blocked: tool {name} requires explicit_approval=true in arguments "
