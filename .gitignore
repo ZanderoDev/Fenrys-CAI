@@ -1,0 +1,40 @@
+# --- Secrets & environment ---
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / TUI ---
+node_modules/
+dist/
+*.tsbuildinfo
+
+# --- Runtime state & artifacts (jangan pernah di-commit) ---
+.fenrys-state/
+.fenrys-workspaces/
+.nyxstrike_data/
+*.sqlite
+*.sqlite-journal
+*.log
+
+# --- Reference archives (besar, bukan milik proyek) ---
+references/
+*.zip
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

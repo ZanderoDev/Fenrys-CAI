@@ -1,0 +1,1 @@
+"""Fenrys terminal UI gateway."""
