@@ -1,4 +1,4 @@
-# 🐺 FENRYS-CAI
+# FENRYS-CAI
 
 **Terminal-first autonomous cybersecurity agent for CTF, Hack The Box & authorized security testing.**
 
