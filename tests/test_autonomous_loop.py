@@ -34,11 +34,15 @@ def test_continue_loops_to_reason_multiple_times(tmp_path: Path) -> None:
     assert state.iteration_count == 3
 
 
-def test_iteration_limit_terminates_continue_loop(tmp_path: Path) -> None:
-    reasoner = SequenceReasoner([Decision("continue", "again")] * 20)
-    state = FenrysGraph(registry(tmp_path), reasoner, loop_config=LoopConfig(max_iterations=3)).run(CyberState("limit", "bounded"))
+def test_runtime_timeout_terminates_continue_loop(tmp_path: Path) -> None:
+    class SlowReasoner:
+        def decide(self, state, tools):
+            __import__("time").sleep(0.02)
+            return Decision("continue", "again")
+    state = FenrysGraph(registry(tmp_path), SlowReasoner(), loop_config=LoopConfig(max_runtime_seconds=0.01)).run(CyberState("limit", "bounded"))
     assert state.completed
-    assert state.history[-1] == "Iteration limit reached"
+    assert state.halt_reason == "runtime_limit"
+    assert state.history[-1] == "Runtime limit reached"
 
 
 def make_attempt(**overrides) -> Attempt:
@@ -58,19 +62,18 @@ def test_attempt_identity_and_meaningful_retries() -> None:
     assert state.can_attempt(make_attempt(progress_token="state-b"))
 
 
-def test_duplicate_graph_attempt_records_dead_end(tmp_path: Path) -> None:
+def test_duplicate_graph_attempts_are_not_blocked(tmp_path: Path) -> None:
     decisions = [
         Decision("execute", {"command": "pwd", "session_id": "duplicate"}, "same strategy"),
         Decision("execute", {"command": "pwd", "session_id": "duplicate"}, "same strategy"),
     ]
     state = FenrysGraph(registry(tmp_path), SequenceReasoner(decisions)).run(CyberState("duplicate", "goal"))
     assert state.completed
-    assert len(state.attempts) == 1
-    assert len(state.dead_ends) == 1
-    assert state.dead_ends[0].blocked_attempts == [state.attempts[0].id]
+    assert len(state.attempts) == 2
+    assert not state.dead_ends
 
 
-def test_hypothesis_attempt_link_and_identical_retest_blocked(tmp_path: Path) -> None:
+def test_hypothesis_attempt_link_allows_identical_retests(tmp_path: Path) -> None:
     hypothesis = HypothesisEngine.create("Local cwd is stable", "verification", 0.5, ["same path"], "goal")
     decisions = [
         Decision("execute", {"command": "pwd", "session_id": "hyp", "hypothesis_id": hypothesis.id}, "test cwd"),
@@ -78,8 +81,8 @@ def test_hypothesis_attempt_link_and_identical_retest_blocked(tmp_path: Path) ->
     ]
     state = FenrysGraph(registry(tmp_path), SequenceReasoner(decisions)).run(CyberState("hyp", "goal", hypotheses=[hypothesis]))
     assert state.attempts[0].hypothesis_id == hypothesis.id
-    assert state.hypotheses[0].test_attempts == [state.attempts[0].id]
-    assert state.dead_ends
+    assert state.hypotheses[0].test_attempts == [item.id for item in state.attempts]
+    assert not state.dead_ends
 
 
 @pytest.mark.parametrize(("expected", "actual", "matched"), [
@@ -123,15 +126,15 @@ def test_graph_verification_confirmed_and_refuted(tmp_path: Path) -> None:
     assert state.verifications[0].status == VerificationStatus.FAILED
 
 
-def test_dead_end_and_loop_counters_survive_checkpoint(tmp_path: Path) -> None:
+def test_attempts_and_loop_counters_survive_checkpoint(tmp_path: Path) -> None:
     database = tmp_path / "loop.sqlite"
     decisions = [Decision("execute", {"command": "pwd", "session_id": "resume"}, "same"),
                  Decision("execute", {"command": "pwd", "session_id": "resume"}, "same")]
     with SqliteSaver.from_conn_string(str(database)) as saver:
         state = FenrysGraph(registry(tmp_path), SequenceReasoner(decisions), saver).run(CyberState("resume", "goal"))
-        assert state.dead_ends
+        assert len(state.attempts) == 2
     with SqliteSaver.from_conn_string(str(database)) as saver:
         restored = FenrysGraph(registry(tmp_path), SequenceReasoner([]), saver).resume("resume")
-    assert restored.dead_ends[0].reason.startswith("Repeated attempt")
+    assert len(restored.attempts) == 2
     assert restored.iteration_count >= 2
-    assert restored.tool_call_count == 1
+    assert restored.tool_call_count == 2

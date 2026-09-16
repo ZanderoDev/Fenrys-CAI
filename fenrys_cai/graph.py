@@ -75,7 +75,7 @@ def _cyber_state(state: GraphState) -> CyberState:
         phase=state.get("phase", "RECON"), findings=list(state.get("findings", [])), hypotheses=[Hypothesis.from_dict(item) for item in state.get("hypotheses", [])],
         verifications=[Verification.from_dict(item) for item in state.get("verifications", [])],
         attempts=[Attempt(**attempt) for attempt in state.get("attempts", [])], evidence=list(state.get("evidence", [])),
-        artifacts=list(state.get("artifacts", [])), history=list(state.get("history", [])), flags=list(state.get("flags", [])), completed=state.get("completed", False),
+        artifacts=list(state.get("artifacts", [])), history=list(state.get("history", [])), flags=list(state.get("flags", [])), completed=state.get("completed", False), halt_reason=state.get("halt_reason"),
         dead_ends=[DeadEnd(**item) for item in state.get("dead_ends", [])], iteration_count=state.get("iteration_count", 0),
         tool_call_count=state.get("tool_call_count", 0), started_at=state.get("started_at", time.time()), progress_markers=list(state.get("progress_markers", [])),
         anti_loop_reconsiderations=state.get("anti_loop_reconsiderations", 0),
@@ -104,8 +104,6 @@ class FenrysGraph:
 
     def _reason(self, state: GraphState) -> GraphState:
         iteration = int(state.get("iteration_count", 0)) + 1
-        if iteration > self.loop_config.max_iterations:
-            return {"completed": True, "halt_reason": "iteration_limit", "history": ["Iteration limit reached"], "iteration_count": iteration}
         if time.time() - float(state.get("started_at", time.time())) > self.loop_config.max_runtime_seconds:
             return {"completed": True, "halt_reason": "runtime_limit", "history": ["Runtime limit reached"], "iteration_count": iteration}
         try:
@@ -113,7 +111,7 @@ class FenrysGraph:
         except LLMError as exc:
             retryable = {"timeout", "connection_failure", "provider_error", "rate_limited"}
             retries = int(state.get("provider_retry_count", 0))
-            if exc.code in retryable and retries < self.loop_config.max_provider_retries:
+            if exc.code in retryable:
                 return {"completed": False, "decision": None, "history": [f"Provider retry scheduled: {exc.code}"],
                         "iteration_count": iteration, "provider_retry_count": retries + 1, "last_provider_error": exc.code}
             return {"completed": True, "halt_reason": "provider_failure", "history": [f"Reasoner failure: {exc.code}"],
@@ -211,16 +209,12 @@ class FenrysGraph:
             return {"specialist": specialist_record, "specialist_depth": depth + 1, "hypotheses": hypothesis_updates,
                     "decision": {"tool": response.decision.tool, "arguments": response.decision.arguments, "rationale": response.decision.rationale}, "history": history}
         if response.decision.kind == "delegate" and response.decision.delegate_to:
-            if depth + 1 > self.specialist_router.max_depth:
-                return {"completed": True, "halt_reason": "specialist_depth", "specialist": specialist_record, "history": ["Specialist delegation depth limit reached"]}
             return {"specialist": specialist_record, "specialist_depth": depth + 1, "hypotheses": hypothesis_updates,
                     "decision": {"tool": "__specialist__", "arguments": {"domain": response.decision.delegate_to}, "rationale": response.decision.rationale}, "history": history}
         return {"specialist": specialist_record, "specialist_depth": depth + 1, "hypotheses": hypothesis_updates, "decision": None, "history": history}
 
     def _act(self, state: GraphState) -> GraphState:
         tool_count = int(state.get("tool_call_count", 0))
-        if tool_count >= self.loop_config.max_tool_calls:
-            return {"completed": True, "halt_reason": "tool_call_limit", "history": ["Tool call limit reached"]}
         decision = state["decision"]
         arguments = decision.get("arguments", {})
         tool_name = decision.get("tool", "")
@@ -230,19 +224,6 @@ class FenrysGraph:
         before_progress = cyber.progress_signature()
         attempt = Attempt(state["goal"], str(arguments.get("target", "local")), tool_name, arguments, rationale, "pending",
                           hypothesis_id=hypothesis_id, progress_token=before_progress)
-        duplicate_count = sum(1 for item in cyber.attempts if item.fingerprint == attempt.fingerprint)
-        if duplicate_count > self.loop_config.max_repeated_attempts:
-            evidence_refs = [item.get("id", "") for item in cyber.evidence[-5:]]
-            dead_end = DeadEnd(state["goal"], attempt.target, "Repeated attempt without meaningful state change",
-                               [item.id for item in cyber.attempts if item.fingerprint == attempt.fingerprint], evidence_refs,
-                               [hypothesis_id] if hypothesis_id else [], ["change parameters", "change strategy", "collect new evidence"])
-            reconsiderations = int(state.get("anti_loop_reconsiderations", 0))
-            if reconsiderations < self.loop_config.max_anti_loop_reconsiderations:
-                return {"completed": False, "decision": None, "dead_ends": [asdict(dead_end)],
-                        "anti_loop_reconsiderations": reconsiderations + 1,
-                        "history": ["Anti-loop blocked repeated action; choose a materially different strategy"]}
-            return {"completed": True, "halt_reason": "anti_loop", "dead_ends": [asdict(dead_end)],
-                    "history": ["Anti-loop blocked materially identical action"]}
         result = self.registry.invoke(tool_name, arguments)
         attempt.result = result.status
         cyber.observe(result)
@@ -269,15 +250,16 @@ class FenrysGraph:
         return data | {"decision": None, "halt_reason": None, "specialist": None, "specialist_depth": 0}
 
     def run(self, state: CyberState, max_steps: int = 20, *, interrupt_after: list[str] | None = None) -> CyberState:
-        limit = min(max_steps, self.loop_config.max_iterations)
-        config = {"configurable": {"thread_id": state.session_id}, "recursion_limit": limit * 4 + 4}
+        # LangGraph requires a recursion guard; use a technical ceiling far above
+        # practical execution. The configured runtime timeout is Fenrys's sole
+        # operational turn budget.
+        config = {"configurable": {"thread_id": state.session_id}, "recursion_limit": 1_000_000}
         final = self.app.invoke(self.initial_state(state), config, interrupt_after=interrupt_after)
         return _cyber_state(final)
 
     def _turn_input(self, session_id: str, message: str, max_steps: int) -> tuple[GraphState, dict[str, Any]]:
         """Build a fresh input or a per-turn delta without replacing session memory."""
-        limit = min(max_steps, self.loop_config.max_iterations)
-        config = {"configurable": {"thread_id": session_id}, "recursion_limit": limit * 4 + 4}
+        config = {"configurable": {"thread_id": session_id}, "recursion_limit": 1_000_000}
         if not self.app.get_state(config).values:
             return self.initial_state(CyberState(session_id, message)), config
         return {
@@ -323,7 +305,7 @@ class FenrysGraph:
         yield {"node": "complete", "state": _cyber_state(self.app.get_state(config).values)}
 
     def resume(self, session_id: str, max_steps: int = 20) -> CyberState:
-        config = {"configurable": {"thread_id": session_id}, "recursion_limit": max_steps * 2 + 2}
+        config = {"configurable": {"thread_id": session_id}, "recursion_limit": 1_000_000}
         snapshot = self.app.get_state(config)
         if not snapshot.values:
             raise ValueError(f"No LangGraph checkpoint for session {session_id!r}")

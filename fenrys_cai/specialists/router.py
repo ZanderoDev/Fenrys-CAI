@@ -21,9 +21,8 @@ _DOMAIN_SIGNALS: dict[str, tuple[str, ...]] = {
 
 class SpecialistRouter:
     """Data-driven specialist selector; it never maps tools or mandates phases."""
-    def __init__(self, specialists: Mapping[str, Specialist], *, max_depth: int = 2) -> None:
+    def __init__(self, specialists: Mapping[str, Specialist]) -> None:
         self.specialists = dict(specialists)
-        self.max_depth = max_depth
 
     def select(self, request: SpecialistRequest) -> str:
         text = " ".join([
@@ -39,8 +38,6 @@ class SpecialistRouter:
         return selected if scores.get(selected, 0) else request.domain
 
     def reason(self, request: SpecialistRequest) -> SpecialistResponse:
-        if request.depth > self.max_depth:
-            return SpecialistResponse(request.domain, __import__("fenrys_cai.specialists.base", fromlist=["SpecialistDecision"]).SpecialistDecision("stop", "Specialist depth limit reached", confidence=0.0))
         domain = self.select(request)
         specialist = self.specialists.get(domain) or self.specialists[request.domain]
         return specialist.reason(SpecialistRequest(domain, request.objective, request.scope, request.phase, request.context, request.tools, request.depth))

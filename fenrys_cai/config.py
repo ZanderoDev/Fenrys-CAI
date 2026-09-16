@@ -26,9 +26,10 @@ class SessionConfig:
 
 @dataclass(frozen=True)
 class LoopConfig:
-    max_iterations: int = 20
-    max_tool_calls: int = 12
-    max_repeated_attempts: int = 0
+    """Runtime budget for an autonomous turn.
+
+    Fenrys intentionally does not impose iteration, tool-call, duplicate-action,
+    specialist-depth, or provider-retry caps. The turn runs until the reasoner
+    finishes, encounters a non-retryable failure, or this timeout expires.
+    """
     max_runtime_seconds: float = 300.0
-    max_anti_loop_reconsiderations: int = 0
-    max_provider_retries: int = 1

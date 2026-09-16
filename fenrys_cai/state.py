@@ -25,6 +25,7 @@ class CyberState:
     history: list[str] = field(default_factory=list)
     flags: list[str] = field(default_factory=list)
     completed: bool = False
+    halt_reason: str | None = None
     dead_ends: list[DeadEnd] = field(default_factory=list)
     iteration_count: int = 0
     tool_call_count: int = 0

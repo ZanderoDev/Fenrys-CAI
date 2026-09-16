@@ -17,11 +17,11 @@ Fenrys-CAI takes a natural-language objective (e.g. *"solve this pwn challenge a
 
 | Area | What you get |
 |---|---|
-| 🧠 Autonomous loop | LangGraph `StateGraph`: `reason → act → specialist → verify`, with iteration/tool-call budgets |
+| 🧠 Autonomous loop | LangGraph `StateGraph`: `reason → act → specialist → verify`, bounded only by the turn runtime timeout |
 | 🖥️ Two interfaces | Headless `fenrys` CLI + rich Ink/React TUI (animated status bar, activity tree, multi-session, state panel) |
 | 🔒 Safe local runtime | Session-isolated working dirs, CPU/memory/file-size limits, bounded output, secret redaction everywhere |
 | 🧪 Evidence-backed | Hypothesis lifecycle (`proposed → testing → confirmed/refuted`) + deterministic observation matchers — exit-code-0 is **not** proof |
-| 🔁 Anti-loop | Attempt fingerprints + progress signatures; repeated dead-ends are blocked and recorded |
+| ♾️ Persistent reasoning | No artificial iteration, tool-call, duplicate-action, specialist-depth, or provider-retry caps; a turn ends on completion, terminal failure, or timeout |
 | 🕵️ 11 specialists | `recon · network · web · api · credentials · pwn · reverse · crypto · forensics · privesc · verification` |
 | 🔌 MCP providers | Generic MCP client (stdio / Streamable HTTP) for external tool servers |
 | 💾 Sessions | SQLite checkpoints — resume any session, continue across turns |
@@ -137,7 +137,7 @@ The TUI spawns `python -m fenrys_cai.tui.entry` from the repo root and talks to 
       └───────────┘
 ```
 
-Key design rules: verification requires evidence (no implicit success), duplicate attempts without new progress are blocked (anti-loop), large outputs spill to content-addressed artifacts instead of state, and secrets are redacted at every serialization boundary.
+Key design rules: verification requires evidence (no implicit success), a turn is bounded by its runtime timeout rather than arbitrary action caps, large outputs spill to content-addressed artifacts instead of state, and secrets are redacted at every serialization boundary.
 
 ---
 

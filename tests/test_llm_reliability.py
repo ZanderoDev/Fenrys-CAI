@@ -44,28 +44,27 @@ def test_timeout_then_success_retries_reason(tmp_path: Path) -> None:
         LLMError("timeout", "synthetic timeout"),
         {"decision": "stop", "rationale": "recovered"},
     ])
-    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), loop_config=LoopConfig(max_provider_retries=1)).run(CyberState("retry", "test"))
+    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider)).run(CyberState("retry", "test"))
     assert state.completed
     assert provider.calls == 2
     assert state.provider_retry_count == 0
     assert any("Provider retry scheduled: timeout" in item for item in state.history)
 
 
-def test_timeout_exhaustion_is_terminal(tmp_path: Path) -> None:
-    provider = SequenceProvider([LLMError("timeout", "one"), LLMError("timeout", "two")])
-    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), loop_config=LoopConfig(max_provider_retries=1)).run(CyberState("exhaust", "test"))
+def test_timeout_retries_until_success(tmp_path: Path) -> None:
+    provider = SequenceProvider([LLMError("timeout", "one"), LLMError("timeout", "two"), {"decision": "stop", "rationale": "recovered"}])
+    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider)).run(CyberState("exhaust", "test"))
     assert state.completed
-    assert provider.calls == 2
-    assert state.last_provider_error == "timeout"
-    assert state.history[-1] == "Reasoner failure: timeout"
+    assert provider.calls == 3
+    assert state.last_provider_error == ""
 
 
 def test_auth_and_malformed_output_do_not_retry(tmp_path: Path) -> None:
     auth = SequenceProvider([LLMError("auth_failure", "bad key")])
-    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(auth), loop_config=LoopConfig(max_provider_retries=3)).run(CyberState("auth", "test"))
+    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(auth)).run(CyberState("auth", "test"))
     assert auth.calls == 1 and state.completed
     malformed = SequenceProvider([{"decision": "not-real", "rationale": "bad"}])
-    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(malformed), loop_config=LoopConfig(max_provider_retries=3)).run(CyberState("bad", "test"))
+    state = FenrysGraph(registry(tmp_path), PrimaryReasoner(malformed)).run(CyberState("bad", "test"))
     assert malformed.calls == 1 and state.completed
 
 
@@ -73,11 +72,11 @@ def test_retry_state_is_checkpoint_safe(tmp_path: Path) -> None:
     database = tmp_path / "retry.sqlite"
     provider = SequenceProvider([LLMError("connection_failure", "down")])
     with SqliteSaver.from_conn_string(str(database)) as saver:
-        graph = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), saver, loop_config=LoopConfig(max_provider_retries=1))
+        graph = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), saver)
         interrupted = graph.run(CyberState("checkpoint-retry", "test"), interrupt_after=["reason"])
         assert interrupted.provider_retry_count == 1
         assert interrupted.last_provider_error == "connection_failure"
     provider = SequenceProvider([{ "decision": "stop", "rationale": "recovered after resume" }])
     with SqliteSaver.from_conn_string(str(database)) as saver:
-        restored = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), saver, loop_config=LoopConfig(max_provider_retries=1)).resume("checkpoint-retry")
+        restored = FenrysGraph(registry(tmp_path), PrimaryReasoner(provider), saver).resume("checkpoint-retry")
     assert restored.completed and restored.provider_retry_count == 0

@@ -56,7 +56,7 @@ class Gateway:
             if state is None:
                 raise RuntimeError("stream_turn completed without a final state")
             self.emit("turn.complete", {"state": state.export()})
-            return {"completed": state.completed, "history": state.history[-1:]}
+            return {"completed": state.completed, "halt_reason": state.halt_reason, "history": state.history[-1:]}
         if method == "session.resume":
             session = str(params.get("session_id") or "default")
             with SqliteSaver.from_conn_string(str(self.state_dir / "checkpoints.sqlite")) as saver:

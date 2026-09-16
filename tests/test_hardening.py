@@ -119,19 +119,21 @@ def test_llm_verification_fallback_and_guardrails() -> None:
         malformed.verify(hypothesis={}, expected="x", actual="y", evidence_ids=[], existing_evidence_ids=set())
 
 
-@pytest.mark.parametrize(("tolerance", "executions"), [(0, 1), (1, 2), (2, 3)])
-def test_repeat_tolerance_semantics(tmp_path: Path, tolerance: int, executions: int) -> None:
+@pytest.mark.parametrize("executions", [1, 2, 3])
+def test_repeated_actions_are_not_limited(tmp_path: Path, executions: int) -> None:
     class Repeat:
         def __init__(self): self.calls = 0
         def decide(self, state, tools):
             self.calls += 1
-            return Decision("execute", {"command": "pwd", "session_id": f"repeat-{tolerance}"}, "same strategy")
+            if self.calls > executions:
+                return Decision("stop", "done", complete=True)
+            return Decision("execute", {"command": "pwd", "session_id": f"repeat-{executions}"}, "same strategy")
     reasoner = Repeat()
     registry = ToolRegistry()
-    registry.register_provider(LocalProvider(LocalTerminalRuntime(RuntimeConfig(tmp_path / f"workspace-{tolerance}"))))
-    state = FenrysGraph(registry, reasoner, loop_config=LoopConfig(max_iterations=8, max_repeated_attempts=tolerance)).run(CyberState(f"repeat-{tolerance}", "goal"))
+    registry.register_provider(LocalProvider(LocalTerminalRuntime(RuntimeConfig(tmp_path / f"workspace-{executions}"))))
+    state = FenrysGraph(registry, reasoner).run(CyberState(f"repeat-{executions}", "goal"))
     assert len(state.attempts) == executions
-    assert state.dead_ends
+    assert not state.dead_ends
 
 
 def test_safe_archive_rejects_traversal_symlink_and_limits(tmp_path: Path) -> None:

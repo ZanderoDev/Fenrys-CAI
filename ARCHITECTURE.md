@@ -48,7 +48,7 @@ The graph includes an optional `specialist` node that is only entered when the m
 3. Invokes a `PromptedSpecialist` that reads a Fenrys-native prompt from `prompts/specialists/<domain>.md` and calls an injected decision builder.
 4. Returns a `SpecialistDecision` with kind (`tool`, `delegate`, `continue`, `stop`), rationale, confidence, and verification requirements.
 5. If the decision is a tool call, it is converted to a normal `Decision` and executed through the existing `act` node.
-6. If the decision is a delegation, the graph routes to another specialist with depth tracking; delegation beyond `max_depth` terminates cleanly.
+6. If the decision is a delegation, the graph routes to another specialist with depth tracking. Delegation remains available until the main reasoner changes strategy, finishes, fails terminally, or the turn runtime timeout expires.
 
 Specialists never own terminals, tool registries, or checkpoints. The 11 domains are: `recon`, `network`, `web`, `api`, `credentials`, `pwn`, `reverse`, `crypto`, `forensics`, `privesc`, `verification`.
 
@@ -111,9 +111,9 @@ Verification records move through `pending`, `in_progress`, then `confirmed`, `f
 
 The primary LLM can emit validated `hypothesis` and `verify` decisions. The graph conditionally routes `verify` to a verification node which creates an in-progress record and returns to reasoning. It does not infer a conclusion before expected and actual observations are compared. Specialists can return hypothesis statements; graph code converts these through `HypothesisEngine` instead of allowing direct state mutation. Active hypotheses and pending verifications are bounded in primary and specialist context.
 
-## Autonomous Loop And Anti-Loop
+## Autonomous Loop And Runtime Timeout
 
-The LangGraph loop is now genuinely autonomous and bounded:
+The LangGraph loop is genuinely autonomous. It has no artificial iteration, tool-call, duplicate-action, specialist-depth, or provider-retry cap:
 
 ```
 REASON
@@ -122,12 +122,12 @@ REASON
   |-- hypothesis -> state update -> REASON
   |-- verify -> VERIFY -> REASON
   |-- continue -> REASON
-  `-- stop/limit/dead-end -> END
+  `-- stop/failure/runtime-timeout -> END
 ```
 
-`LoopConfig` centralizes `max_iterations`, `max_tool_calls`, `max_repeated_attempts`, and `max_runtime_seconds`. Counters and start time are checkpointed. The graph checks limits before each reasoning/tool action.
+`LoopConfig` centralizes only `max_runtime_seconds` (300 seconds by default). The graph checks this timeout before each reasoning action. LangGraph keeps a high technical recursion guard (`1_000_000`) because the framework requires one; it is not an operational agent budget.
 
-Attempt identity hashes normalized objective, target, tool, sorted parameters, normalized strategy, and optional hypothesis ID. It is distinct from hypothesis identity. A retry is accepted when parameters, target, strategy, hypothesis, or deterministic progress token changes. A repeated identity without state progress is blocked and recorded as a persistent `DeadEnd` containing blocked attempts, evidence references, related hypotheses, and suggested alternatives.
+Attempt identity hashes normalized objective, target, tool, sorted parameters, normalized strategy, and optional hypothesis ID. It is retained for evidence and diagnostics, but duplicate executions are not blocked.
 
 Progress signatures are deterministic hashes of semantic evidence descriptors, artifacts, findings, hypothesis transitions, and verification transitions. A successful command with no new semantic state is not itself progress.
 
@@ -162,7 +162,7 @@ Natural-language objective
   -> adaptive specialist
   -> typed hypothesis
   -> hypothesis-linked tool actions
-  -> anti-loop block + reconsideration
+   -> repeated actions remain available until reasoner stop or runtime timeout
   -> evidence-backed deterministic verification
   -> confirmed hypothesis and synthetic flag
   -> STOP
@@ -170,12 +170,10 @@ Natural-language objective
 
 The harness uses a disposable session workspace containing a manifest, a large decoy, an encoded candidate, and an independent SHA-256. It intentionally interrupts after the first action and resumes through a new graph instance backed by the same SQLite checkpointer. All later decisions use restored attempts, evidence, progress counters, hypotheses, and dead ends.
 
-Anti-loop normally terminates on a duplicate. For recoverable engagements, `max_anti_loop_reconsiderations` permits a bounded number of blocked duplicates to return to `REASON`; the tool is still not executed and a `DeadEnd` is always retained. The next decision must use a materially different strategy.
-
 ## LLM Reliability
 
 Core local tools expose valid Fenrys JSON Schema contracts rather than informal type strings. `read_file` and `write_file` require workspace-relative `path` and `session_id`; `execute` documents only its implemented command, process-management, timeout, PTY, stdin, and environment fields. The primary prompt explicitly requires schema-compliant workspace paths, hypothesis/verification for non-trivial claims, and evidence-backed CTF completion.
 
-Transient `LLMError` categories (`timeout`, `connection_failure`, `provider_error`, `rate_limited`) use a bounded `LoopConfig.max_provider_retries` retry path. The checkpointed state contains only retry count and error category, never credentials. Authentication, malformed response, invalid schema, and invalid decision errors are terminal and are not retried.
+Transient `LLMError` categories (`timeout`, `connection_failure`, `provider_error`, `rate_limited`) retry until the turn runtime timeout expires. The checkpointed state contains only retry count and error category, never credentials. Authentication, malformed response, invalid schema, and invalid decision errors are terminal and are not retried.
 
 Custom OpenAI-compatible providers use the existing `LLMProvider` with no provider-specific client. Configure `FENRYS_LLM_ENDPOINT`, `FENRYS_LLM_MODEL`, `FENRYS_LLM_API_KEY`, and `FENRYS_LLM_PROTOCOL=openai`. The provider appends `/chat/completions` exactly once, normalizes the OpenAI `choices[0].message.content` response, and is shared by primary reasoning and specialists.

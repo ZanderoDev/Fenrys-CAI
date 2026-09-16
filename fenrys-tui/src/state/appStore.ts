@@ -182,11 +182,13 @@ function applyEvent(
         phase: 'idle',
         busySince: null,
       }
+      const succeeded = st.halt_reason === 'goal_achieved'
+      const stopped = Boolean(st.halt_reason) && !succeeded
       ns = pushActivity(ns, {
         kind: 'note',
-        title: st.completed ? 'objektif tercapai ✓' : 'turn selesai',
+        title: succeeded ? 'objektif tercapai ✓' : stopped ? `turn dihentikan · ${st.halt_reason}` : 'turn selesai',
         detail: last || undefined,
-        status: st.completed ? 'ok' : 'pending',
+        status: succeeded ? 'ok' : stopped ? 'warn' : 'pending',
       })
       // Tampilkan ringkasan akhir agen sebagai baris transkrip agar terbaca
       // di log (bukan hanya di blok aktivitas yang akan hilang).

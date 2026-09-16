@@ -73,10 +73,10 @@ def test_graph_optional_specialist_returns_tool_and_observation(tmp_path: Path) 
     assert state.evidence[-1]["status"] == "success"
 
 
-def test_specialist_depth_limit_stops_delegation(tmp_path: Path) -> None:
+def test_specialist_delegation_has_no_depth_limit(tmp_path: Path) -> None:
     def decide(request, prompt):
         return SpecialistDecision("delegate", "needs another domain", delegate_to="crypto")
     router = build_router(Path("prompts/specialists"), decide)
     response = router.reason(SpecialistRequest("verification", "delegate", "lab", "VERIFY", {}, depth=3))
-    assert response.decision.kind == "stop"
-    assert "depth limit" in response.decision.rationale
+    assert response.decision.kind == "delegate"
+    assert response.decision.delegate_to == "crypto"

@@ -118,6 +118,7 @@ export interface CyberStateExport {
   history: string[]
   flags: string[]
   completed: boolean
+  halt_reason: string | null
   dead_ends: DeadEnd[]
   iteration_count: number
   tool_call_count: number

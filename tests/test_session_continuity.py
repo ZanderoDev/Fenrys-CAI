@@ -56,14 +56,13 @@ def test_second_turn_resets_turn_counters_and_keeps_evidence(tmp_path: Path) -> 
     assert second.evidence == first.evidence
 
 
-def test_dead_end_blocks_repeat_across_turns(tmp_path: Path) -> None:
+def test_repeat_is_allowed_across_turns(tmp_path: Path) -> None:
     reasoner = SequenceReasoner([execute("session"), Decision("stop", "first", complete=True), execute("session")])
-    graph = FenrysGraph(registry(tmp_path), reasoner, loop_config=LoopConfig(max_repeated_attempts=0))
+    graph = FenrysGraph(registry(tmp_path), reasoner)
     first = graph.continue_session("session", "objective")
     second = graph.continue_session("session", "repeat it")
-    assert len(first.attempts) == len(second.attempts) == 1
-    assert second.completed
-    assert second.dead_ends[0].blocked_attempts == [first.attempts[0].id]
+    assert len(first.attempts) == 1
+    assert len(second.attempts) == 2
 
 
 def test_continue_after_completed_session_retains_evidence(tmp_path: Path) -> None:

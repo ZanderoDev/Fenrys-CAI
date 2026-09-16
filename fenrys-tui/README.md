@@ -38,7 +38,7 @@ Jika provider belum siap, panel sesi akan menampilkan peringatan dan cara mengis
 - **Status bar hidup** — spinner braille + kata-kerja perburuan yang berganti,
   elapsed time, fase, dan hitungan evidence/hipotesis/attempt/flags.
 - **Activity tree** — rails `├─/└─` untuk reasoning, tool (✓/✗/⚠), specialist,
-  dan verifikasi, dengan status berwarna. Anti-loop ditandai jelas.
+  dan verifikasi, dengan status berwarna.
 - **Slash commands + multi-session**:
   - `/help` — bantuan
   - `/new [nama]` — sesi baru
