@@ -7,6 +7,15 @@ name = "fenrys-cai"
 version = "0.1.0"
 description = "Terminal-first cybersecurity agent for authorized labs and CTFs"
 requires-python = ">=3.11"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{name = "ZanderoDev"}]
+keywords = ["ctf", "security", "pentest", "agent", "langgraph", "tui"]
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Environment :: Console",
+  "Topic :: Security",
+]
 dependencies = ["langgraph>=0.6,<0.7", "langgraph-checkpoint-sqlite>=3,<4", "pydantic>=2.7,<3", "httpx>=0.28,<1", "pyyaml>=6,<7"]
 
 [project.optional-dependencies]

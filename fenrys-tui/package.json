@@ -2,6 +2,7 @@
   "name": "fenrys-tui",
   "version": "0.2.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "Terminal UI untuk FENRYS-CAI — agen siber autonomous (CTF/HTB/lab)",
   "type": "module",
   "scripts": {
